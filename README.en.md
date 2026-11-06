@@ -91,6 +91,8 @@ If the Electron binary was not downloaded successfully during installation, run 
 node apps/desktop/node_modules/electron/install.js
 ```
 
+When GitHub Releases is unreachable, set `ELECTRON_MIRROR` for that command, or configure `electron_mirror` in your user-level `~/.npmrc`, for example `https://npmmirror.com/mirrors/electron/`. The downloaded zip is cached in `~/Library/Caches/electron/`, so reinstalls do not need the network again. The repository sets no mirror, so CI keeps fetching from the official URL.
+
 ## Using AI
 
 AI is optional. Local reading, search, and annotations do not require an AI account.
@@ -152,7 +154,7 @@ The terminal prints a URL in the form `http://127.0.0.1:5173/#token=…`. Open t
 
 Development runs leave the connector port disabled unless `NEOREAD_DEV_CONNECTOR=1` is set. Unpackaged desktop runs register `neoread://` only with `NEOREAD_DEV_PROTOCOL=1`.
 
-`pnpm dev`, `pnpm desktop` and `pnpm build` prepare the pinned layout model before running. The first build downloads approximately 67 MB; later builds verify and reuse the ignored `apps/processor/models/` cache. For an offline build, set `NEOREAD_BUILD_LAYOUT_MODEL` to the absolute path of an existing copy of the pinned weights; size and SHA256 verification still apply. Installation, type checking and ordinary unit tests do not download the model.
+`pnpm dev`, `pnpm desktop` and `pnpm build` prepare the pinned layout model before running. The first build downloads approximately 67 MB; later builds verify and reuse the ignored `apps/processor/models/` cache. For an offline build, set `NEOREAD_BUILD_LAYOUT_MODEL` to the absolute path of an existing copy of the pinned weights; size and SHA256 verification still apply. When huggingface.co is unreachable, set `HF_ENDPOINT` to a compatible mirror such as `https://hf-mirror.com`; the same size and SHA256 checks still apply. Installation, type checking and ordinary unit tests do not download the model.
 
 ```sh
 pnpm typecheck     # TypeScript type checking

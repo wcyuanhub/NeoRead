@@ -63,6 +63,7 @@ vi.mock("pdfjs-dist/web/pdf_viewer.mjs", () => ({
   },
 }));
 import { PDFReaderAdapter } from "./pdf";
+import { PDFViewport } from "./pdf-viewport";
 
 let adapter: PDFReaderAdapter;
 let host: HTMLDivElement;
@@ -258,6 +259,13 @@ it("keeps manual zoom across theme changes and resizing, then permits fit width"
   await adapter.setTheme({ ...defaultTheme, zoom: "width" });
   expect(state.scaleValue).toBe("page-width");
 });
+it("reapplies fit width after a pane expands even when the preference is unchanged", async () => {
+  state.scale = 2;
+  await adapter.setTheme({ ...defaultTheme, zoom: "width" });
+  expect(state.scale).toBe(1);
+  expect(state.scaleValue).toBe("page-width");
+});
+
 it("bounds gesture zoom and removes event handlers on disposal", async () => {
   for (let i = 0; i < 40; i++) wheel({ deltaY: -100000 });
   expect(state.scale).toBe(5);
@@ -310,6 +318,47 @@ it("resizes a manually zoomed PDF with its pane and preserves horizontal and ver
     expect(host.scrollLeft).toBeCloseTo(320);
     expect(host.scrollTop).toBeCloseTo(1100);
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("follows page coordinates without resize transforms and remembers the new position", async () => {
+  let width = 800;
+  let animating = true;
+  Object.defineProperties(host, {
+    clientWidth: { get: () => width, configurable: true },
+    clientHeight: { value: 600, configurable: true },
+  });
+  host.getBoundingClientRect = () => new DOMRect(0, 0, width, 600);
+  const page = document.createElement("div");
+  page.className = "page";
+  host.append(page);
+  page.getBoundingClientRect = () =>
+    new DOMRect(
+      -host.scrollLeft,
+      (animating ? 1000 : 0) - host.scrollTop,
+      1000 * state.scale,
+      1200 * state.scale,
+    );
+  state.pageNode = page;
+  const cancel = vi
+    .spyOn(PDFViewport.prototype, "cancelAnimation")
+    .mockImplementation(() => {
+      animating = false;
+    });
+  vi.useFakeTimers();
+  try {
+    adapter.followPDFViewport({ page: 1, x: 0.1, y: 0.3, scale: 1 });
+    expect(cancel).toHaveBeenCalled();
+    expect(host.scrollTop).toBe(360);
+    expect(host.scrollLeft).toBe(100);
+    width = 400;
+    state.resize?.();
+    await vi.advanceTimersByTimeAsync(160);
+    expect(host.scrollTop).toBe(360);
+    expect(host.scrollLeft).toBe(300);
+  } finally {
+    cancel.mockRestore();
     vi.useRealTimers();
   }
 });

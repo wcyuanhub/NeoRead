@@ -42,6 +42,26 @@ function sumOptional(a: number | null, b: number | null) {
 function detail(value: number | null) {
   return value === null ? "未返回" : count(value);
 }
+/** Absent and zero readings stay in the grid, just quieter than a real number. */
+const emptyReadings = new Set([
+  "0",
+  "未返回",
+  "未记录",
+  "未知",
+  "用量未知",
+  "暂无记录",
+  "0 次",
+  "—",
+]);
+function Metric({ label, value }: { label: string; value: string | number }) {
+  const empty = value === 0 || emptyReadings.has(String(value));
+  return (
+    <div {...(empty ? { "data-empty": "" } : {})}>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
 function add(a: TokenCounts, b: TokenCounts): TokenCounts {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
@@ -91,30 +111,28 @@ export function UsageDetails({ report }: { report: ProcessingUsage }) {
   return (
     <div className="processing-usage">
       <dl className="usage-totals">
-        <div>
-          <dt>已记录总量</dt>
-          <dd>
-            {known
+        <Metric
+          label="已记录总量"
+          value={
+            known
               ? `${count(report.total.totalTokens)} tokens`
               : report.calls.length
                 ? "用量未知"
-                : "暂无记录"}
-          </dd>
-        </div>
-        <div>
-          <dt>输入</dt>
-          <dd>{known ? count(report.total.inputTokens) : "—"}</dd>
-        </div>
-        <div>
-          <dt>输出</dt>
-          <dd>{known ? count(report.total.outputTokens) : "—"}</dd>
-        </div>
-        <div>
-          <dt>累计执行耗时</dt>
-          <dd>
-            {report.elapsedMs ? usageDuration(report.elapsedMs) : "未记录"}
-          </dd>
-        </div>
+                : "暂无记录"
+          }
+        />
+        <Metric
+          label="输入"
+          value={known ? count(report.total.inputTokens) : "—"}
+        />
+        <Metric
+          label="输出"
+          value={known ? count(report.total.outputTokens) : "—"}
+        />
+        <Metric
+          label="累计执行耗时"
+          value={report.elapsedMs ? usageDuration(report.elapsedMs) : "未记录"}
+        />
       </dl>
       {!report.historyComplete && (
         <p className="usage-note">历史用量未记录；仅统计启用功能后的调用。</p>
@@ -277,62 +295,46 @@ function StageRows({
                       <span>{providers[group.provider] || group.provider}</span>
                     </div>
                     <dl className="usage-model-metrics">
-                      <div>
-                        <dt>调用次数</dt>
-                        <dd>{group.calls}</dd>
-                      </div>
-                      <div>
-                        <dt>成功</dt>
-                        <dd>{complete}</dd>
-                      </div>
-                      <div>
-                        <dt>未成功</dt>
-                        <dd>{failed}</dd>
-                      </div>
-                      <div>
-                        <dt>进行中</dt>
-                        <dd>{running}</dd>
-                      </div>
-                      <div>
-                        <dt>输入 token</dt>
-                        <dd>
-                          {known ? count(group.tokens.inputTokens) : "未知"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>输出 token</dt>
-                        <dd>
-                          {known ? count(group.tokens.outputTokens) : "未知"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>总 token</dt>
-                        <dd>
-                          {known ? count(group.tokens.totalTokens) : "未知"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>关联调用累计耗时</dt>
-                        <dd>
-                          {finished.length ? usageDuration(duration) : "未记录"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>缓存读取 token</dt>
-                        <dd>{detail(group.tokens.cachedInputTokens)}</dd>
-                      </div>
-                      <div>
-                        <dt>缓存写入 token</dt>
-                        <dd>{detail(group.tokens.cacheWriteInputTokens)}</dd>
-                      </div>
-                      <div>
-                        <dt>推理 token</dt>
-                        <dd>{detail(group.tokens.reasoningOutputTokens)}</dd>
-                      </div>
-                      <div>
-                        <dt>用量未知</dt>
-                        <dd>{group.unknownCalls} 次</dd>
-                      </div>
+                      <Metric label="调用次数" value={group.calls} />
+                      <Metric label="成功" value={complete} />
+                      <Metric label="未成功" value={failed} />
+                      <Metric label="进行中" value={running} />
+                      <Metric
+                        label="输入 token"
+                        value={known ? count(group.tokens.inputTokens) : "未知"}
+                      />
+                      <Metric
+                        label="输出 token"
+                        value={
+                          known ? count(group.tokens.outputTokens) : "未知"
+                        }
+                      />
+                      <Metric
+                        label="总 token"
+                        value={known ? count(group.tokens.totalTokens) : "未知"}
+                      />
+                      <Metric
+                        label="关联调用累计耗时"
+                        value={
+                          finished.length ? usageDuration(duration) : "未记录"
+                        }
+                      />
+                      <Metric
+                        label="缓存读取 token"
+                        value={detail(group.tokens.cachedInputTokens)}
+                      />
+                      <Metric
+                        label="缓存写入 token"
+                        value={detail(group.tokens.cacheWriteInputTokens)}
+                      />
+                      <Metric
+                        label="推理 token"
+                        value={detail(group.tokens.reasoningOutputTokens)}
+                      />
+                      <Metric
+                        label="用量未知"
+                        value={`${group.unknownCalls} 次`}
+                      />
                     </dl>
                     {!!partial && (
                       <p className="usage-note">
@@ -410,23 +412,25 @@ export function ProcessingUsageDialog({
           <DialogTitle>用量统计</DialogTitle>
           <DialogDescription>{document?.title}</DialogDescription>
         </DialogHeader>
-        {error && (
-          <div role="alert">
-            <p>{error}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRetry((value) => value + 1)}
-            >
-              重新加载
-            </Button>
-          </div>
-        )}
-        {report ? (
-          <UsageDetails report={report} />
-        ) : (
-          !error && <p role="status">正在读取统计…</p>
-        )}
+        <div className="usage-dialog-body">
+          {error && (
+            <div role="alert">
+              <p>{error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRetry((value) => value + 1)}
+              >
+                重新加载
+              </Button>
+            </div>
+          )}
+          {report ? (
+            <UsageDetails report={report} />
+          ) : (
+            !error && <p role="status">正在读取统计…</p>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

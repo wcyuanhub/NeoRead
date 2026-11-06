@@ -8,6 +8,7 @@ NeoRead 的 logo 与应用图标。所有文件由 `scripts/build-brand-assets.m
 | `logo/neoread-mark.svg`、`logo/neoread-mark-light.svg` | 不带底板的标志，分别用于浅色和深色背景 |
 | `logo/png/` | 256 / 512 / 1024 px 位图 |
 | `icons/macos/icon.icns` | macOS 应用图标（`icon.svg` 为 1024 px 网格源图） |
+| `icons/macos/icon-1024.png` | 未打包桌面版的 Dock 图标；`nativeImage` 读不到 `.icns` |
 | `icons/windows/icon.ico` | Windows 应用与安装器图标，16–256 px |
 
-16–32 px 的尺寸使用更粗的笔画。官网的 `website/assets/favicon.*` 与 `apple-touch-icon.png` 也由同一脚本生成；GitHub Pages 只发布 `website/`，所以官网使用的图片和截图保留在 `website/assets/`。
+16–32 px 的尺寸使用更粗的笔画。官网的 `website/assets/favicon.*` 与 `apple-touch-icon.png` 也由同一脚本生成；GitHub Pages 只发布 `website/`，所以官网使用的图片和截图保留在 `website/assets/`。渲染器的标签页图标 `apps/web/public/favicon.svg` 是同一份 SVG 的副本，由 Vite 复制到 `apps/web/dist`。

@@ -68,6 +68,29 @@ it("never represents missing or historical usage as zero tokens", () => {
   expect(text).not.toContain("0 tokens");
 });
 
+it("keeps every reading slot and quiets only the absent ones", () => {
+  const markup = renderToStaticMarkup(<UsageDetails report={report} />);
+  for (const label of [
+    "调用次数",
+    "成功",
+    "未成功",
+    "进行中",
+    "输入 token",
+    "输出 token",
+    "总 token",
+    "关联调用累计耗时",
+    "缓存读取 token",
+    "缓存写入 token",
+    "推理 token",
+    "用量未知",
+  ])
+    expect(markup).toContain(`<dt>${label}</dt>`);
+  expect(markup).toContain('<div data-empty=""><dt>成功</dt><dd>0</dd></div>');
+  expect(markup).not.toContain('<div data-empty=""><dt>未成功');
+  // Zero and unreturned readings still occupy the four-column grid.
+  expect(markup.match(/data-empty=""/g)).toHaveLength(4);
+});
+
 it("combines processing and chat totals without counting cache subsets twice", () => {
   const chatReport = {
     ...report,

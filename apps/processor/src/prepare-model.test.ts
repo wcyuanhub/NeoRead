@@ -40,6 +40,23 @@ it("downloads the pinned revision and publishes only a verified model", async ()
   );
 });
 
+it("downloads from a mirror endpoint when the build overrides it", async () => {
+  const root = await temporary();
+  const fetch = vi.fn(async () => new Response(contents));
+  vi.stubGlobal("fetch", fetch);
+  const path = await prepareModel(
+    root,
+    undefined,
+    specification,
+    "https://hf-mirror.com/",
+  );
+  expect(await readFile(path, "utf8")).toBe(contents);
+  expect(fetch).toHaveBeenCalledWith(
+    `https://hf-mirror.com/${model.repository}/resolve/${model.revision}/${model.file}`,
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+});
+
 it("reuses a verified build cache without network access", async () => {
   const root = await temporary();
   const path = join(root, filename);

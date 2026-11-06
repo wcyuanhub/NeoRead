@@ -475,7 +475,14 @@ export interface LinkPreview {
   /** Re-render the crop from the PDF at the requested physical pixel width. */
   renderImage?: (width: number, signal: AbortSignal) => Promise<string>;
 }
+export interface PDFPageViewport {
+  page: number;
+  x: number;
+  y: number;
+  scale: number;
+}
 export interface ReaderEvents {
+  pdfViewport?: (viewport: PDFPageViewport) => void;
   /** Show (or hide with null) a preview of an internal link's target. */
   linkPreview?: (preview: LinkPreview | null) => void;
   /** An internal link is about to move away from this location. */
@@ -510,6 +517,8 @@ export interface ReaderAdapter {
   open(document: Document): Promise<void>;
   getTOC(): Promise<TOCItem[]>;
   getPageCount?(): number;
+  getPDFViewport?(): PDFPageViewport | undefined;
+  followPDFViewport?(viewport: PDFPageViewport): void;
   getLocation(): DocumentLocation;
   goTo(location: DocumentLocation): Promise<void>;
   next(): Promise<void>;

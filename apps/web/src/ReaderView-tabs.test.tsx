@@ -32,7 +32,8 @@ vi.mock("./readers/pdf", () => ({
 }));
 let host: HTMLDivElement, root: Root;
 const location = vi.fn(),
-  zoom = vi.fn();
+  zoom = vi.fn(),
+  pdfViewport = vi.fn();
 function readers(active: string, ids = ["a", "b"]) {
   return (
     <>
@@ -48,6 +49,7 @@ function readers(active: string, ids = ["a", "b"]) {
             location: (next) => location(id, next),
             selection: () => {},
             zoom,
+            pdfViewport,
           }}
         />
       ))}
@@ -86,13 +88,18 @@ it("does not let hidden reader events change progress or zoom, and reuses its en
   fixture.events.get("a")!.zoom?.(2);
   fixture.events.get("a")!.zoom?.(2.5, "focus");
   fixture.events.get("a")!.zoom?.(1, "layout", 0.5);
+  const viewport = { page: 6, x: 0.1, y: 0.4, scale: 1.5 };
+  fixture.events.get("a")!.pdfViewport?.(viewport);
   fixture.events.get("a")!.location({ type: "pdf", page: 6 }, 0.6);
+  expect(pdfViewport).not.toHaveBeenCalled();
   expect(zoom).not.toHaveBeenCalled();
   expect(location).not.toHaveBeenCalled();
   const previous = fixture.events.get("a");
   await act(async () => root.render(readers("a")));
   fixture.events.get("a")!.location({ type: "pdf", page: 7 }, 0.7);
   fixture.events.get("a")!.zoom?.(1.5);
+  fixture.events.get("a")!.pdfViewport?.(viewport);
+  expect(pdfViewport).toHaveBeenCalledExactlyOnceWith(viewport);
   expect(location).toHaveBeenLastCalledWith("a", { type: "pdf", page: 7 });
   expect(zoom).toHaveBeenLastCalledWith(1.5);
   fixture.events.get("a")!.zoom?.(2.5, "focus");

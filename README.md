@@ -90,6 +90,8 @@ pnpm desktop
 node apps/desktop/node_modules/electron/install.js
 ```
 
+无法访问 GitHub Releases 时，为该命令设置 `ELECTRON_MIRROR`，或在用户级 `~/.npmrc` 中配置 `electron_mirror`，例如 `https://npmmirror.com/mirrors/electron/`。下载的 zip 缓存在 `~/Library/Caches/electron/`，重装时不需要再次联网；仓库不设置镜像，CI 仍从官方地址获取。
+
 ## 使用 AI
 
 AI 是可选功能。本地阅读、搜索和批注不需要登录 AI 账户。
@@ -155,7 +157,7 @@ pnpm dev
 
 开发运行默认不监听插件端口；设置 `NEOREAD_DEV_CONNECTOR=1` 可启用。未打包桌面版默认不注册 `neoread://`；设置 `NEOREAD_DEV_PROTOCOL=1` 可启用。
 
-`pnpm dev`、`pnpm desktop` 和 `pnpm build` 会先准备固定版本的版面模型。首次构建需要下载约 67 MB，后续校验并复用 `apps/processor/models/` 中的构建缓存；该目录不进入 Git。离线构建可将 `NEOREAD_BUILD_LAYOUT_MODEL` 设为已有权重文件的绝对路径，仍需通过大小和 SHA256 校验。`pnpm install`、类型检查和普通单元测试不下载模型。
+`pnpm dev`、`pnpm desktop` 和 `pnpm build` 会先准备固定版本的版面模型。首次构建需要下载约 67 MB，后续校验并复用 `apps/processor/models/` 中的构建缓存；该目录不进入 Git。离线构建可将 `NEOREAD_BUILD_LAYOUT_MODEL` 设为已有权重文件的绝对路径，仍需通过大小和 SHA256 校验。无法直连 huggingface.co 时可设 `HF_ENDPOINT` 为兼容的镜像站点（例如 `https://hf-mirror.com`），大小和 SHA256 校验不变。`pnpm install`、类型检查和普通单元测试不下载模型。
 
 ```sh
 pnpm typecheck     # TypeScript 类型检查

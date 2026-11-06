@@ -69,6 +69,7 @@ export function TranslationPanes({
     </ResizablePanel>,
     <ResizableHandle
       key="divider"
+      withHandle
       className="translation-divider"
       disabled={!parallel}
       hidden={!parallel}

@@ -10,6 +10,8 @@ type DesktopModule = Pick<typeof import("./index"), "adoptStartupWindow">;
 /** Keep business modules out of the path to the first loading-window frame. */
 export async function bootstrapDesktop(loadDesktop: () => DesktopModule) {
   const appEvents: EventEmitter = app;
+  // Unpackaged runs inherit Electron's bundle name in the macOS app menu.
+  if (!app.isPackaged) app.setName("NeoRead");
   const startedAt = performance.now();
   const entryMs = Math.round(process.uptime() * 1000);
   const isolation = devIsolation({

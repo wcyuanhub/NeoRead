@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
 import { useReaderStore } from "../store";
 import { ReadingLinkNavigation } from "../reading-links";
-import { act, useContext, useEffect } from "react";
+import {
+  act,
+  useContext,
+  useEffect,
+  useImperativeHandle,
+  type ComponentProps,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PDFLayoutHandle, PDFLayoutPages } from "./PDFLayoutPages";
 import {
   defaultTheme,
   type Document,
   type PDFBlock,
+  type PDFPageViewport,
   type ReaderAdapter,
   type ReaderEvents,
   type ReaderTheme,
@@ -26,6 +34,23 @@ const fixture = vi.hoisted(() => ({
       ) => void)
     | undefined,
   signal: undefined as AbortSignal | undefined,
+  layoutProps: undefined as ComponentProps<typeof PDFLayoutPages> | undefined,
+  translationViewport: undefined as PDFPageViewport | undefined,
+  layoutFollow: vi.fn<PDFLayoutHandle["follow"]>(),
+  layoutGetViewport: vi.fn<PDFLayoutHandle["getViewport"]>(),
+  layoutGoTo: vi.fn<PDFLayoutHandle["goTo"]>(),
+}));
+// Keep these tests at the parent interaction boundary, without loading PDF.js.
+vi.mock("./PDFLayoutPages", () => ({
+  PDFLayoutPages: (props: ComponentProps<typeof PDFLayoutPages>) => {
+    fixture.layoutProps = props;
+    useImperativeHandle(props.ref, () => ({
+      follow: fixture.layoutFollow,
+      getViewport: fixture.layoutGetViewport,
+      goTo: fixture.layoutGoTo,
+    }));
+    return <>{props.children}</>;
+  },
 }));
 vi.mock("@neoread/api", () => ({
   api: {
@@ -94,6 +119,8 @@ const adapter = {
   flashReference: vi.fn(),
   cancelBlockFocus: vi.fn(),
   followBlock: vi.fn(async () => {}),
+  getPDFViewport: vi.fn<NonNullable<ReaderAdapter["getPDFViewport"]>>(),
+  followPDFViewport: vi.fn(),
   focusSentences: vi.fn(async () => {}),
   hoverBlock: vi.fn(),
 } as unknown as ReaderAdapter;
@@ -112,16 +139,47 @@ vi.mock("../ReaderView", () => ({
 }));
 import { PDFReadingView } from "./PDFReadingView";
 let root: Root, host: HTMLDivElement;
-const events = { location: vi.fn(), selection: vi.fn() };
+// jsdom never resizes, so tests fire the observers an effect attached to a node.
+const resizeHandlers = new Map<Element, Set<() => void>>();
+class TestResizeObserver {
+  private targets = new Set<Element>();
+  constructor(private callback: () => void) {}
+  observe(target: Element) {
+    this.targets.add(target);
+    const callbacks = resizeHandlers.get(target) ?? new Set();
+    callbacks.add(this.callback);
+    resizeHandlers.set(target, callbacks);
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+    resizeHandlers.get(target)?.delete(this.callback);
+  }
+  disconnect() {
+    for (const target of this.targets)
+      resizeHandlers.get(target)?.delete(this.callback);
+    this.targets.clear();
+  }
+}
+async function fireResize(target: Element) {
+  await act(async () => {
+    for (const callback of [...(resizeHandlers.get(target) ?? [])]) callback();
+  });
+}
+const events = { location: vi.fn(), selection: vi.fn(), zoom: vi.fn() };
 beforeEach(async () => {
+  fixture.layoutProps = undefined;
+  fixture.translationViewport = undefined;
+  fixture.layoutFollow.mockReset().mockImplementation(() => {
+    if (fixture.layoutProps?.enabled) fixture.layoutProps.onFollow();
+  });
+  fixture.layoutGetViewport
+    .mockReset()
+    .mockImplementation(() => fixture.translationViewport);
+  fixture.layoutGoTo.mockReset();
+  vi.mocked(adapter.getPDFViewport!).mockReset();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
+  resizeHandlers.clear();
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener() {},
@@ -142,6 +200,8 @@ beforeEach(async () => {
   document.body.append(host);
   root = createRoot(host);
   await renderView();
+  // Existing paragraph/selection tests exercise the retained reflow view.
+  await click("连续文本");
 });
 async function renderView(
   theme: ReaderTheme = defaultTheme,
@@ -208,6 +268,7 @@ afterEach(async () => {
   useReaderStore.getState().setTheme({ reducedMotion: false });
   host.remove();
   window.getSelection()?.removeAllRanges();
+  delete adapter.getPageCount;
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
@@ -1144,5 +1205,376 @@ it("strips legacy cross-side links when preparing a mark without losing its posi
   expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
     "p1-b1",
     "parallel",
+  );
+});
+
+describe("preserved PDF layout parent interactions", () => {
+  const viewport: PDFPageViewport = {
+    page: 3,
+    x: 0.125,
+    y: 0.65,
+    scale: 1.4,
+  };
+
+  async function openLayout(mode = "原文译文") {
+    await click("保留排版");
+    await click(mode);
+    expect(fixture.layoutProps?.enabled).toBe(true);
+  }
+
+  async function scrollTranslation(input: "wheel" | "pointerdown" = "wheel") {
+    const pane = host.querySelector<HTMLElement>(".translation-document")!;
+    await act(async () => {
+      pane.dispatchEvent(
+        input === "wheel"
+          ? new WheelEvent("wheel", { bubbles: true, deltaY: 100 })
+          : new MouseEvent("pointerdown", { bubbles: true, button: 0 }),
+      );
+      pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await new Promise(requestAnimationFrame);
+    });
+  }
+
+  it("defaults to preserved layout and switches back to reflow without recreating the source", async () => {
+    // Remount to inspect the default before the legacy beforeEach selects reflow.
+    await act(async () => root.render(null));
+    await renderView();
+    const source = host.querySelector(".translation-source");
+    const reading = host.querySelector(".pdf-reading")!;
+    const selectedTab = () =>
+      host.querySelector('[aria-label="译文排版"] [aria-selected="true"]')
+        ?.textContent;
+    expect(reading.hasAttribute("data-page-layout")).toBe(true);
+    expect(selectedTab()).toBe("保留排版");
+    expect(host.querySelector('[aria-label="放大页面"]')).not.toBeNull();
+    await click("原文译文");
+    expect(fixture.layoutProps).toMatchObject({
+      enabled: true,
+      documentId: "doc",
+      theme: defaultTheme,
+      scale: 1,
+    });
+    expect(fixture.layoutProps!.blocks[0].id).toBe("p1-b1");
+    expect(fixture.layoutProps!.translations.get("p1-b1")).toEqual(
+      fixture.translations[0],
+    );
+    expect(fixture.layoutProps!.host.current).toBe(
+      host.querySelector(".translation-document"),
+    );
+    await click("连续文本");
+    expect(reading.hasAttribute("data-page-layout")).toBe(false);
+    expect(selectedTab()).toBe("连续文本");
+    expect(fixture.layoutProps?.enabled).toBe(false);
+    expect(host.querySelector('[aria-label="放大页面"]')).toBeNull();
+    expect(host.textContent).toContain("第二句。");
+    await click("保留排版");
+    expect(selectedTab()).toBe("保留排版");
+    expect(fixture.layoutProps?.enabled).toBe(true);
+    expect(host.querySelector(".translation-source")).toBe(source);
+    expect(adapter.destroy).not.toHaveBeenCalled();
+  });
+
+  it("preserves the reading paragraph between page and continuous translation layouts", async () => {
+    await openLayout("仅译文");
+    const { pane } = translationGeometry();
+    fixture.translationViewport = { ...viewport, page: 1, y: 0.35 };
+    await click("连续文本");
+    expect(pane.scrollTop).toBeCloseTo(400);
+    pane.scrollTop = 450;
+    await scrollTranslation();
+    fixture.layoutFollow.mockClear();
+    await click("保留排版");
+    expect(fixture.layoutFollow).toHaveBeenLastCalledWith({
+      page: 1,
+      x: 0,
+      y: 0.425,
+      scale: fixture.layoutProps!.scale,
+    });
+  });
+
+  it("forwards source page viewports without feeding programmatic scrolls back", async () => {
+    await openLayout();
+    fixture.translationViewport = viewport;
+    fixture.layoutFollow.mockClear();
+    await act(async () => fixture.events!.pdfViewport?.(viewport));
+    expect(fixture.layoutFollow).toHaveBeenCalledExactlyOnceWith(viewport);
+    // Fit width makes each pane size its own page, so the source scale does
+    // not override the translated page after the divider moves.
+    expect(fixture.layoutProps?.scale).toBe(1);
+    expect(host.querySelector('[aria-label="适合页宽"]')?.textContent).toBe(
+      "100%",
+    );
+    await act(async () => {
+      host
+        .querySelector(".translation-document")!
+        .dispatchEvent(new Event("scroll", { bubbles: true }));
+      await new Promise(requestAnimationFrame);
+    });
+    expect(adapter.followPDFViewport).not.toHaveBeenCalled();
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+    expect(adapter.focusBlock).not.toHaveBeenCalled();
+  });
+
+  it("restores the latest source viewport when layout pages finish loading", async () => {
+    await openLayout();
+    await act(async () => fixture.events!.pdfViewport?.(viewport));
+    fixture.layoutFollow.mockClear();
+    await act(async () => fixture.layoutProps!.onReady());
+    expect(fixture.layoutFollow).toHaveBeenCalledExactlyOnceWith(viewport);
+  });
+
+  it("stops following source viewports when sync is disabled and resumes from the source", async () => {
+    await openLayout();
+    await click("取消同步效果");
+    fixture.layoutFollow.mockClear();
+    await act(async () => fixture.events!.pdfViewport?.(viewport));
+    expect(fixture.layoutFollow).not.toHaveBeenCalled();
+    await act(async () => fixture.layoutProps!.onReady());
+    expect(fixture.layoutFollow).not.toHaveBeenCalled();
+    expect(
+      host
+        .querySelector('[aria-label="开启同步效果"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+    vi.mocked(adapter.getPDFViewport!).mockReturnValue(viewport);
+    await click("开启同步效果");
+    expect(fixture.layoutFollow).toHaveBeenCalledExactlyOnceWith(viewport);
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+  });
+
+  it.each(["wheel", "pointerdown"] as const)(
+    "lets translated %s scrolling lead page sync without source feedback",
+    async (input) => {
+      await openLayout();
+      adapter.getPageCount = () => 8;
+      fixture.translationViewport = viewport;
+      fixture.layoutFollow.mockClear();
+      await scrollTranslation(input);
+      expect(fixture.layoutGetViewport).toHaveBeenCalled();
+      expect(adapter.followPDFViewport).toHaveBeenCalledExactlyOnceWith(
+        viewport,
+      );
+      expect(events.location).toHaveBeenLastCalledWith(
+        { type: "pdf", page: 3, x: 0.125, y: 0.65 },
+        3 / 8,
+      );
+      expect(adapter.followBlock).not.toHaveBeenCalled();
+      await act(async () => fixture.events!.pdfViewport?.(viewport));
+      expect(fixture.layoutFollow).not.toHaveBeenCalled();
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+        host
+          .querySelector(".translation-source")!
+          .dispatchEvent(
+            new WheelEvent("wheel", { bubbles: true, deltaY: 10 }),
+          );
+        fixture.events!.pdfViewport?.(viewport);
+      });
+      expect(fixture.layoutFollow).toHaveBeenCalledExactlyOnceWith(viewport);
+    },
+  );
+
+  it("keeps translated location updates with sync off and resumes from the translated viewport", async () => {
+    await openLayout();
+    adapter.getPageCount = () => 8;
+    await click("取消同步效果");
+    fixture.translationViewport = viewport;
+    await scrollTranslation();
+    expect(adapter.followPDFViewport).not.toHaveBeenCalled();
+    expect(events.location).toHaveBeenLastCalledWith(
+      { type: "pdf", page: 3, x: 0.125, y: 0.65 },
+      3 / 8,
+    );
+    await click("开启同步效果");
+    expect(adapter.followPDFViewport).toHaveBeenCalledExactlyOnceWith(viewport);
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+  });
+
+  it("does not run reflow synchronization for source reading anchors in page layout", async () => {
+    await openLayout();
+    const { pane } = translationGeometry();
+    const anchor = { blockId: "p1-b1", fraction: 0.5 };
+    fixture.layoutFollow.mockClear();
+    await act(async () => fixture.events!.readingAnchor?.(anchor));
+    expect(pane.scrollTop).toBe(0);
+    expect(fixture.layoutFollow).not.toHaveBeenCalled();
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+    // The same event still drives the legacy layout after an explicit switch.
+    await click("连续文本");
+    pane.scrollTop = 0;
+    await act(async () => fixture.events!.readingAnchor?.(anchor));
+    expect(pane.scrollTop).toBe(400);
+  });
+
+  it("updates page zoom through both toolbar buttons and preserves the translation-only pane", async () => {
+    await renderView({ ...defaultTheme, zoom: 1.25 });
+    await openLayout();
+    const pane = host.querySelector(".translation-document");
+    const source = host.querySelector(".translation-source");
+    const ready = fixture.ready;
+    events.zoom.mockClear();
+    vi.mocked(adapter.setTheme).mockClear();
+    await click("放大页面");
+    expect(fixture.layoutProps?.scale).toBeCloseTo(1.375);
+    expect(events.zoom).toHaveBeenLastCalledWith(1.375);
+    expect(adapter.setTheme).toHaveBeenLastCalledWith(
+      expect.objectContaining({ zoom: 1.375 }),
+    );
+    await click("缩小页面");
+    expect(fixture.layoutProps?.scale).toBeCloseTo(1.25);
+    expect(events.zoom).toHaveBeenLastCalledWith(1.25);
+    await click("仅译文");
+    expect(host.querySelector(".translation-document")).toBe(pane);
+    expect(host.querySelector(".translation-source")).toBe(source);
+    expect(source?.hasAttribute("inert")).toBe(true);
+    expect(host.querySelectorAll('[aria-label="放大页面"]')).toHaveLength(1);
+    expect(fixture.layoutProps?.enabled).toBe(true);
+    await click("放大页面");
+    expect(fixture.layoutProps?.scale).toBeCloseTo(1.375);
+    expect(fixture.ready).toBe(ready);
+    expect(adapter.destroy).not.toHaveBeenCalled();
+    expect(adapter.focusBlock).not.toHaveBeenCalled();
+  });
+
+  it.each(["原文译文", "仅原文"])(
+    "preserves the translated page and offset when returning to %s",
+    async (mode) => {
+      await openLayout("仅译文");
+      fixture.translationViewport = viewport;
+      await scrollTranslation();
+      const sourceViewport = { ...viewport, page: 1, y: 0, scale: 0.75 };
+      vi.mocked(adapter.getPDFViewport!).mockReturnValue(sourceViewport);
+      vi.mocked(adapter.setTheme).mockImplementationOnce(async () => {
+        fixture.events!.pdfViewport?.(sourceViewport);
+      });
+      fixture.layoutFollow.mockClear();
+      vi.mocked(adapter.followBlock!).mockClear();
+      await click(mode);
+      expect(adapter.followPDFViewport).toHaveBeenCalledExactlyOnceWith(
+        viewport,
+      );
+      if (mode === "原文译文") {
+        expect(fixture.layoutFollow).toHaveBeenLastCalledWith({
+          ...viewport,
+          scale: sourceViewport.scale,
+        });
+        expect(fixture.layoutProps?.scale).toBe(sourceViewport.scale);
+      }
+      expect(adapter.followBlock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the visible source page when opening translation-only mode", async () => {
+    await openLayout();
+    vi.mocked(adapter.getPDFViewport!).mockReturnValue(viewport);
+    fixture.translationViewport = { ...viewport, page: 1, y: 0 };
+    fixture.layoutFollow.mockClear();
+    await click("仅译文");
+    expect(fixture.layoutFollow).toHaveBeenLastCalledWith(viewport);
+    expect(adapter.followPDFViewport).not.toHaveBeenCalled();
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+  });
+
+  it("fits translation-only pages using the translated pane width", async () => {
+    await openLayout("仅译文");
+    const pane = host.querySelector<HTMLElement>(".translation-document")!;
+    Object.defineProperty(pane, "clientWidth", {
+      value: 832,
+      configurable: true,
+    });
+    // The PDF.js child normally supplies the intrinsic page width in points.
+    const page = document.createElement("div");
+    page.dataset.pageWidth = "600";
+    pane.append(page);
+    await click("放大页面");
+    await click("适合页宽");
+    expect(fixture.layoutProps?.scale).toBeCloseTo(1);
+    expect(events.zoom).toHaveBeenLastCalledWith("width");
+    expect(adapter.setTheme).toHaveBeenLastCalledWith(
+      expect.objectContaining({ zoom: "width" }),
+    );
+  });
+
+  it("fits the split translated page to its own pane, not the source viewport", async () => {
+    await openLayout();
+    const pane = host.querySelector<HTMLElement>(".translation-document")!;
+    const page = document.createElement("div");
+    page.dataset.pageWidth = "600";
+    pane.append(page);
+    let width = 1632;
+    Object.defineProperty(pane, "clientWidth", {
+      get: () => width,
+      configurable: true,
+    });
+    // Moving the divider resizes only this pane; the page follows it.
+    await fireResize(pane);
+    expect(fixture.layoutProps?.scale).toBeCloseTo(2);
+    width = 432;
+    await fireResize(pane);
+    expect(fixture.layoutProps?.scale).toBeCloseTo(0.5);
+    await act(async () =>
+      fixture.events!.pdfViewport?.({ ...viewport, scale: 1.4 }),
+    );
+    expect(fixture.layoutProps?.scale).toBeCloseTo(0.5);
+  });
+
+  it("tracks translation-only page locations without following or accepting the hidden source", async () => {
+    await openLayout("仅译文");
+    adapter.getPageCount = () => 8;
+    fixture.translationViewport = { ...viewport, x: -0.1, y: -0.05 };
+    await scrollTranslation();
+    expect(fixture.ready!.getLocation()).toEqual({
+      type: "pdf",
+      page: 3,
+      x: 0,
+      y: 0,
+    });
+    expect(events.location).toHaveBeenLastCalledWith(
+      { type: "pdf", page: 3, x: 0, y: 0 },
+      3 / 8,
+    );
+    expect(adapter.followPDFViewport).not.toHaveBeenCalled();
+    fixture.layoutFollow.mockClear();
+    const scale = fixture.layoutProps!.scale;
+    await act(async () =>
+      fixture.events!.pdfViewport?.({ ...viewport, page: 1, scale: 2 }),
+    );
+    expect(fixture.layoutFollow).not.toHaveBeenCalled();
+    expect(fixture.layoutProps?.scale).toBe(scale);
+    expect(fixture.ready!.getLocation()).toEqual({
+      type: "pdf",
+      page: 3,
+      x: 0,
+      y: 0,
+    });
+    await act(async () => fixture.ready!.next());
+    expect(adapter.goTo).toHaveBeenLastCalledWith({ type: "pdf", page: 4 });
+    expect(fixture.layoutGoTo).toHaveBeenLastCalledWith({
+      type: "pdf",
+      page: 4,
+    });
+  });
+
+  it.each([false, true])(
+    "navigates layout pages using the source viewport when available (%s)",
+    async (hasViewport) => {
+      await openLayout();
+      await click("取消同步效果");
+      const location = { type: "pdf" as const, page: 3, x: 0.2, y: 0.4 };
+      vi.mocked(adapter.getPDFViewport!).mockReturnValue(
+        hasViewport ? viewport : undefined,
+      );
+      fixture.layoutFollow.mockClear();
+      await act(async () => fixture.ready!.goTo(location));
+      expect(adapter.goTo).toHaveBeenCalledExactlyOnceWith(location);
+      if (hasViewport) {
+        expect(fixture.layoutFollow).toHaveBeenCalledExactlyOnceWith(viewport);
+        expect(fixture.layoutGoTo).not.toHaveBeenCalled();
+      } else {
+        expect(fixture.layoutGoTo).toHaveBeenCalledExactlyOnceWith(location);
+        expect(fixture.layoutFollow).not.toHaveBeenCalled();
+      }
+      expect(adapter.focusBlock).not.toHaveBeenCalled();
+    },
   );
 });

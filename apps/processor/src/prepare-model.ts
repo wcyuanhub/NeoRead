@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { model, verifyModel } from "./model";
 
 // Build-time only: the runtime worker never imports this module.
+export const defaultModelEndpoint = "https://huggingface.co";
+
 export async function prepareModel(
   directory: string,
   source?: string,
   expected = model,
+  endpoint = defaultModelEndpoint,
 ) {
   await mkdir(directory, { recursive: true });
   const target = join(directory, `${expected.name}-${expected.revision}.onnx`);
@@ -25,8 +28,9 @@ export async function prepareModel(
       await copyFile(source, part);
     } else {
       console.log(`Preparing ${expected.name} (${expected.bytes} bytes)`);
+      const base = endpoint.replace(/\/+$/, "");
       const response = await fetch(
-        `https://huggingface.co/${expected.repository}/resolve/${expected.revision}/${expected.file}`,
+        `${base}/${expected.repository}/resolve/${expected.revision}/${expected.file}`,
         { signal: AbortSignal.timeout(300_000) },
       );
       if (!response.ok || !response.body)

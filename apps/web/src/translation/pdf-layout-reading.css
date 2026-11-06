@@ -1,0 +1,141 @@
+.translation-page-pane {
+  display: flex;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pdf-reading .translation-document.pdf-layout-document {
+  padding: 0;
+  overflow-anchor: none;
+  background: var(--background);
+}
+.pdf-layout-pages {
+  display: flow-root;
+  min-width: 100%;
+  width: max-content;
+  padding-bottom: 50vh;
+}
+.pdf-layout-page {
+  position: relative;
+  margin: 20px auto;
+  flex: none;
+  background: #fff;
+  box-shadow: 0 1px 8px #0000000f;
+  color: #111;
+  isolation: isolate;
+}
+.pdf-layout-sheet {
+  position: relative;
+  transform-origin: top left;
+}
+.pdf-layout-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.pdf-layout-mask,
+.pdf-layout-block,
+.pdf-layout-placeholder {
+  position: absolute;
+}
+.pdf-layout-block:not([data-covered]) {
+  overflow: clip;
+}
+.pdf-layout-mask {
+  background: #fff;
+  pointer-events: none;
+}
+.pdf-layout-body {
+  position: relative;
+  overflow-wrap: normal;
+  word-break: normal;
+  color: #111;
+}
+.pdf-layout-document .pdf-layout-block section {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  max-width: none;
+  width: 100%;
+  min-height: 100%;
+  overflow-wrap: normal;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+.pdf-layout-document .pdf-layout-block > section {
+  height: 100%;
+}
+.pdf-layout-body .message-markdown {
+  font-size: inherit;
+  line-height: inherit;
+  font-family: inherit;
+  color: inherit;
+}
+.pdf-layout-body .message-markdown :is(p, h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+.pdf-layout-body .message-markdown :is(ul, ol) {
+  margin: 0;
+  padding-left: 1.3em;
+}
+.pdf-layout-body .translation-note-indicator {
+  left: -4px;
+  width: 2px;
+}
+.pdf-layout-expand {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: auto;
+  min-height: 14px;
+  padding: 1px 4px;
+  font-size: 8px;
+  line-height: 1.4;
+  border-radius: 3px;
+  opacity: 0.8;
+}
+.pdf-layout-expand:hover,
+.pdf-layout-expand:focus-visible {
+  opacity: 1;
+}
+.pdf-layout-expanded {
+  width: min(560px, calc(100vw - 32px));
+  font-size: 16px;
+  line-height: 1.8;
+}
+.pdf-layout-message {
+  padding: 24px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.pdf-reading[data-page-layout] .pdf-reading-controls {
+  inset: auto 0 0;
+  height: 46px;
+  padding: 6px 16px;
+  justify-content: space-between;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+}
+.pdf-reading[data-page-layout] .pdf-page-navigation {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.pdf-layout-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pdf-reading[data-theme="dark"] .pdf-layout-page,
+.pdf-reading[data-theme="dark"] .pdf-layout-mask {
+  background: var(--pdf-dark-paper);
+}
+.pdf-reading[data-theme="dark"] .pdf-layout-body {
+  color: var(--pdf-dark-ink);
+}

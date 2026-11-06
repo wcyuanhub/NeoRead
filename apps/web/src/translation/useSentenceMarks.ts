@@ -531,6 +531,18 @@ export function useSentenceMarks(
       node instanceof Element &&
       (node.matches(textSelector) || !!node.querySelector(textSelector));
     const observer = new MutationObserver((records) => {
+      if (
+        records.some(
+          (record) =>
+            record.type === "attributes" &&
+            record.target instanceof Element &&
+            record.target.matches(".pdf-layout-sheet, .pdf-layout-body"),
+        )
+      ) {
+        interruptHover();
+        schedule();
+        return;
+      }
       // Positioning and action overlays change frequently while scrolling. Only
       // text-layer replacement/content changes invalidate sentence ranges.
       if (
@@ -551,6 +563,8 @@ export function useSentenceMarks(
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ["style"],
     });
     const resize = new ResizeObserver(schedule);
     resize.observe(host);

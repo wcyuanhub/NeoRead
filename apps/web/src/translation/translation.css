@@ -51,8 +51,49 @@
 .translation-divider[hidden] {
   display: none;
 }
+/* The registry handle is a 1px line with a 4px hit strip, which is impossible
+   to find between two full-bleed pages. Keep the line, widen the target. */
+.translation-panes .translation-divider {
+  flex: none;
+  width: 12px;
+  background: transparent;
+}
+.translation-panes .translation-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  background: var(--border);
+  transform: translateX(-50%);
+}
+.translation-panes .translation-divider > div {
+  width: 3px;
+  height: 28px;
+  border-radius: 3px;
+  background: var(--muted-foreground);
+  opacity: 0.35;
+  transition: opacity 150ms ease-out;
+}
+.translation-panes .translation-divider:hover > div,
+.translation-panes .translation-divider:focus-visible > div {
+  opacity: 0.9;
+}
 .translation-divider[aria-orientation="horizontal"] {
   cursor: row-resize;
+}
+.translation-panes .translation-divider[aria-orientation="horizontal"] {
+  width: 100%;
+  height: 12px;
+}
+.translation-panes .translation-divider[aria-orientation="horizontal"]::before {
+  inset: 50% 0 auto;
+  width: auto;
+  height: 1px;
+  transform: translateY(-50%);
+}
+.translation-panes .translation-divider[aria-orientation="horizontal"] > div {
+  width: 28px;
+  height: 3px;
 }
 .translation-pane-controls {
   position: absolute;
@@ -61,12 +102,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + 6px));
 }
 .translation-panes[data-stacked] .translation-pane-controls {
   left: 12px;
   flex-direction: row;
-  transform: translateY(-50%);
+  transform: translateY(calc(-50% + 6px));
 }
 .translation-pane-controls > button {
   cursor: pointer;
@@ -234,6 +275,9 @@
 :root[data-reduced-motion="true"] {
   .translation-document {
     scroll-behavior: auto;
+  }
+  .translation-panes .translation-divider > div {
+    transition: none;
   }
 }
 .pdf-reading[data-theme="sepia"] .translation-document,

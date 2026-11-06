@@ -78,6 +78,10 @@ export function ReaderView({
         epubBlockAction: (block, action) => {
           if (!disposed) latest.current.events.epubBlockAction?.(block, action);
         },
+        pdfViewport: (viewport) => {
+          if (!disposed && latest.current.active)
+            latest.current.events.pdfViewport?.(viewport);
+        },
         readingAnchor: (anchor) => {
           if (!disposed && latest.current.active)
             latest.current.events.readingAnchor?.(anchor);

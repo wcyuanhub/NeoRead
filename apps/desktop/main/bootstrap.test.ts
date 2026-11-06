@@ -24,6 +24,7 @@ beforeEach(() => {
     isPackaged: true,
     getPath: () => "/isolated",
     setPath: vi.fn(),
+    setName: vi.fn(),
     requestSingleInstanceLock: () => true,
     whenReady: async () => {},
     quit: vi.fn(),
@@ -82,4 +83,13 @@ it("does not create a loading window for a second app instance", async () => {
   expect(state.app.quit).toHaveBeenCalledOnce();
   expect(state.create).not.toHaveBeenCalled();
   expect(loadBusiness).not.toHaveBeenCalled();
+});
+it("renames only unpackaged runs, which otherwise report Electron", async () => {
+  state.app.isPackaged = false;
+  await bootstrapDesktop(() => ({ adoptStartupWindow: vi.fn() }));
+  expect(state.app.setName).toHaveBeenCalledWith("NeoRead");
+});
+it("keeps the bundle name of a packaged build", async () => {
+  await bootstrapDesktop(() => ({ adoptStartupWindow: vi.fn() }));
+  expect(state.app.setName).not.toHaveBeenCalled();
 });

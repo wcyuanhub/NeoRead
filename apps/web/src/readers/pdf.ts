@@ -1,5 +1,6 @@
 import { reportDiagnostic } from "../diagnostics";
 import { PDFResizeObserver } from "./pdf-resize";
+import { pageViewport, followPageViewport } from "./pdf-page-viewport";
 import { readPDFOutline } from "./pdf-outline";
 import { PDFFigureLinks } from "./pdf-figure-links";
 import { selectionContext } from "./selection-context";
@@ -25,6 +26,7 @@ import type {
   Document,
   DocumentLocation,
   PDFLocation,
+  PDFPageViewport,
   ReaderAdapter,
   ReaderEvents,
   ReaderSelection,
@@ -138,6 +140,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.bus.on("scalechanging", () => {
       if (!this.disposed && !this.resizingViewport)
         this.viewport.scaleChanged();
+      this.schedulePageViewport();
     });
     this.bus.on("pagesinit", () => {
       // PDFViewer resets lang during setup. Explicitly mark it unknown before
@@ -257,6 +260,31 @@ export class PDFReaderAdapter implements ReaderAdapter {
   getPageCount() {
     return this.pdf?.numPages ?? 0;
   }
+  getPDFViewport() {
+    return pageViewport(
+      this.container,
+      Array.from(
+        this.container.querySelectorAll<HTMLElement>(".pdfViewer > .page"),
+      ),
+      this.viewer.currentScale,
+    );
+  }
+  followPDFViewport(viewport: PDFPageViewport) {
+    const page = this.viewer.getPageView(viewport.page - 1)?.div;
+    if (!page || this.disposed) return;
+    this.viewport.cancelAnimation();
+    this.navigation.stop();
+    followPageViewport(this.container, page, viewport);
+    this.viewport.reset();
+  }
+  private schedulePageViewport() {
+    cancelAnimationFrame(this.viewportFrame);
+    this.viewportFrame = requestAnimationFrame(() => {
+      this.viewport.remember();
+      const viewport = this.getPDFViewport();
+      if (viewport && !this.disposed) this.events.pdfViewport?.(viewport);
+    });
+  }
   getLocation(): PDFLocation {
     const page = this.viewer.getPageView(this.location.page - 1)?.div as
       HTMLElement | undefined;
@@ -364,8 +392,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
   };
   private onScroll = () => {
     this.clearSelection();
-    cancelAnimationFrame(this.viewportFrame);
-    this.viewportFrame = requestAnimationFrame(() => this.viewport.remember());
+    this.schedulePageViewport();
   };
   private onPointerDown = (event: PointerEvent) => {
     this.viewport.cancelAnimation();
@@ -556,7 +583,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
         pageColors?.background ?? "#ffffff",
       );
     if (colorsChanged) this.linkPreview.invalidate();
-    if (this.pdf && this.appliedZoom !== theme.zoom) {
+    if (
+      this.pdf &&
+      (this.appliedZoom !== theme.zoom || theme.zoom === "width")
+    ) {
       this.navigation.stop();
       this.fitWidth = theme.zoom === "width";
       this.appliedZoom = theme.zoom;
