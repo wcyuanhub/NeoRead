@@ -167,6 +167,7 @@ async function fireResize(target: Element) {
 }
 const events = { location: vi.fn(), selection: vi.fn(), zoom: vi.fn() };
 beforeEach(async () => {
+  useReaderStore.getState().setTheme({ readerLayout: undefined });
   fixture.layoutProps = undefined;
   fixture.translationViewport = undefined;
   fixture.layoutFollow.mockReset().mockImplementation(() => {
@@ -313,6 +314,22 @@ it("switches modes without recreating the PDF or marking the opposite selection"
   await click("仅原文");
   expect(host.querySelector(".translation-document")).toBeNull();
   expect(adapter.destroy).not.toHaveBeenCalled();
+});
+it("reopens with the last chosen view and page layout", async () => {
+  await click("原文译文");
+  await click("连续文本");
+  expect(useReaderStore.getState().theme.readerLayout).toMatchObject({
+    translationView: "parallel",
+    pdfPageLayout: false,
+  });
+  await act(async () => root.render(null));
+  await renderView();
+  const reading = host.querySelector(".pdf-reading")!;
+  expect(reading.getAttribute("data-reading-mode")).toBe("parallel");
+  expect(reading.hasAttribute("data-page-layout")).toBe(false);
+  expect(
+    host.querySelector(".translation-panes")?.getAttribute("data-mode"),
+  ).toBe("parallel");
 });
 it("keeps the translated selection and navigation metadata without marking the original", async () => {
   const highlights = new Map<string, Set<Range>>();
@@ -1236,8 +1253,10 @@ describe("preserved PDF layout parent interactions", () => {
   }
 
   it("defaults to preserved layout and switches back to reflow without recreating the source", async () => {
-    // Remount to inspect the default before the legacy beforeEach selects reflow.
+    // A library without a saved preference falls back to the page layout even
+    // though the legacy beforeEach already selected reflow.
     await act(async () => root.render(null));
+    useReaderStore.getState().setTheme({ readerLayout: undefined });
     await renderView();
     const source = host.querySelector(".translation-source");
     const reading = host.querySelector(".pdf-reading")!;

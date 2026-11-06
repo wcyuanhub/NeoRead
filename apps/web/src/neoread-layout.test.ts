@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { defaultTheme } from "@neoread/core";
+import { defaultTheme, type TranslationView } from "@neoread/core";
 import {
   readerLayout,
   sidebarLayout,
@@ -22,6 +22,25 @@ it("uses defaults for old libraries and invalid stored widths", () => {
       sourceWidth: 100,
     }),
   ).toMatchObject({ navigationWidth: 15, assistantWidth: 25, sourceWidth: 50 });
+});
+
+it("restores the view and page layout choices and rejects unknown ones", () => {
+  expect(readerLayout(undefined)).toMatchObject({
+    translationView: "source",
+    pdfPageLayout: true,
+  });
+  expect(
+    readerLayout({
+      translationView: "three columns" as TranslationView,
+      pdfPageLayout: false,
+    }),
+  ).toMatchObject({ translationView: "source", pdfPageLayout: false });
+  updateReaderLayout({ translationView: "parallel", pdfPageLayout: false });
+  const saved = JSON.parse(JSON.stringify(useReaderStore.getState().theme));
+  expect(readerLayout(saved.readerLayout)).toMatchObject({
+    translationView: "parallel",
+    pdfPageLayout: false,
+  });
 });
 
 it("merges adjacent operations and keeps expanded widths through collapse, reload and reopen", () => {

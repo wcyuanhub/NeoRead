@@ -355,6 +355,8 @@ export interface ReaderAnnotationTarget {
   anchor: SelectionAnchor;
 }
 export type Appearance = "light" | "sepia" | "dark" | "system";
+/** Which text the reading view shows. */
+export type TranslationView = "source" | "parallel" | "translation";
 /** Last user-chosen reading layout, shared by PDF and EPUB documents. */
 export interface ReaderLayout {
   /** Expanded sidebar widths as percentages of the full reading workspace. */
@@ -367,6 +369,9 @@ export interface ReaderLayout {
   swapped: boolean;
   /** Parallel mode stacks source and translation top and bottom. */
   stacked: boolean;
+  translationView: TranslationView;
+  /** PDFs keep the original page geometry instead of a flowing text view. */
+  pdfPageLayout: boolean;
 }
 export interface ReaderTheme {
   /** Ordered open documents and the selected document; null selects the library. */

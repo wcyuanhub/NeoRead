@@ -1,5 +1,6 @@
 import { figureTarget } from "../readers/figure-references";
 import { readerLayout, updateReaderLayout } from "../neoread-layout";
+import { useReaderStore } from "../store";
 import {
   useEffect,
   useLayoutEffect,
@@ -27,6 +28,7 @@ import type {
   SearchResult,
   TOCItem,
   TranslationBlock,
+  TranslationView,
 } from "@neoread/core";
 import { defaultTheme, isPDFPageDecoration, zoomCommand } from "@neoread/core";
 import { api } from "@neoread/api";
@@ -59,7 +61,6 @@ import { AssistanceControls } from "./AssistanceControls";
 import { chapterRange, headingPages } from "./chapters";
 import { searchPDFBlocks } from "./pdf-search";
 
-type Mode = "source" | "parallel" | "translation";
 export function PDFReadingView({
   document: doc,
   active = true,
@@ -91,10 +92,14 @@ export function PDFReadingView({
   events: ReaderEvents;
 }) {
   const { swapped, sourceWidth } = readerLayout(theme.readerLayout);
-  const [mode, setMode] = useState<Mode>("source"),
-    [syncEnabled, setSyncEnabled] = useState(true);
+  const mode = useReaderStore(
+    (state) => readerLayout(state.theme.readerLayout).translationView,
+  );
+  const pageLayout = useReaderStore(
+    (state) => readerLayout(state.theme.readerLayout).pdfPageLayout,
+  );
+  const [syncEnabled, setSyncEnabled] = useState(true);
   const { translations, error } = useTranslations(doc.id);
-  const [pageLayout, setPageLayout] = useState(true);
   const [pageScale, setPageScale] = useState(
     typeof theme.zoom === "number" ? theme.zoom : 1,
   );
@@ -116,7 +121,7 @@ export function PDFReadingView({
         : null,
     );
   };
-  const previousMode = useRef<Mode>("source");
+  const previousMode = useRef<TranslationView>(mode);
   const syncEnabledRef = useRef(syncEnabled);
   syncEnabledRef.current = syncEnabled;
   const explicitFocus = useRef({
@@ -777,7 +782,7 @@ export function PDFReadingView({
       }
     });
   };
-  const changeMode = (value: Mode) => {
+  const changeMode = (value: TranslationView) => {
     modeViewport.current = pageLayout
       ? ((mode === "translation" ||
         (mode === "parallel" && side.current === "translation")
@@ -786,7 +791,7 @@ export function PDFReadingView({
       : undefined;
     input(value === "translation" ? "translation" : "source");
     setPopup(undefined);
-    setMode(value);
+    updateReaderLayout({ translationView: value });
   };
   const fitTranslationWidth = () => {
     const host = pane.current;
@@ -949,7 +954,10 @@ export function PDFReadingView({
           );
         }}
       />
-      <Tabs value={mode} onValueChange={(v) => changeMode(v as Mode)}>
+      <Tabs
+        value={mode}
+        onValueChange={(v) => changeMode(v as TranslationView)}
+      >
         <TabsList>
           <TabsTrigger value="source">仅原文</TabsTrigger>
           <TabsTrigger value="parallel" data-tour="parallel-mode">
@@ -994,7 +1002,7 @@ export function PDFReadingView({
               };
           }
           input(mode === "translation" ? "translation" : side.current);
-          setPageLayout(value === "page");
+          updateReaderLayout({ pdfPageLayout: value === "page" });
         }}
       >
         <TabsList aria-label="译文排版">

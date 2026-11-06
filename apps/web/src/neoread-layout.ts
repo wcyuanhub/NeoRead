@@ -1,5 +1,7 @@
-import type { ReaderLayout, ReaderTheme } from "@neoread/core";
+import type { ReaderLayout, ReaderTheme, TranslationView } from "@neoread/core";
 import { useReaderStore } from "./store";
+
+const views: TranslationView[] = ["source", "parallel", "translation"];
 
 const defaults: ReaderLayout = {
   navigationWidth: 15,
@@ -9,6 +11,8 @@ const defaults: ReaderLayout = {
   sourceWidth: 50,
   swapped: false,
   stacked: false,
+  translationView: "source",
+  pdfPageLayout: true,
 };
 
 /** Old libraries and invalid saved values keep the existing reader defaults. */
@@ -24,8 +28,14 @@ export function readerLayout(value: ReaderTheme["readerLayout"]): ReaderLayout {
       : defaults[key];
   };
   const flag = (
-    key: "navigationOpen" | "assistantOpen" | "swapped" | "stacked",
+    key:
+      | "navigationOpen"
+      | "assistantOpen"
+      | "swapped"
+      | "stacked"
+      | "pdfPageLayout",
   ) => (typeof value?.[key] === "boolean" ? value[key] : defaults[key]);
+  const view = views.find((item) => item === value?.translationView);
   return {
     navigationWidth: width("navigationWidth", 30),
     assistantWidth: width("assistantWidth", 45),
@@ -34,6 +44,8 @@ export function readerLayout(value: ReaderTheme["readerLayout"]): ReaderLayout {
     sourceWidth: width("sourceWidth", 80, 20),
     swapped: flag("swapped"),
     stacked: flag("stacked"),
+    translationView: view ?? defaults.translationView,
+    pdfPageLayout: flag("pdfPageLayout"),
   };
 }
 

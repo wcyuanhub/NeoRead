@@ -129,6 +129,7 @@ const blocks: import("@neoread/core").EPUBReadingBlock[] = [
 let root: Root, host: HTMLDivElement;
 const events = { location: vi.fn(), selection: vi.fn() };
 beforeEach(async () => {
+  useReaderStore.getState().setTheme({ readerLayout: undefined });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "ResizeObserver",
@@ -261,6 +262,17 @@ it("keeps the translation subscription alive across modes and aborts on close", 
   expect(fixture.signal?.aborted).toBe(false);
   await act(async () => root.unmount());
   expect(fixture.signal?.aborted).toBe(true);
+});
+it("reopens with the last chosen view", async () => {
+  await click("仅译文");
+  expect(useReaderStore.getState().theme.readerLayout).toMatchObject({
+    translationView: "translation",
+  });
+  await act(async () => root.render(null));
+  await renderView();
+  expect(
+    host.querySelector(".translation-panes")?.getAttribute("data-mode"),
+  ).toBe("translation");
 });
 
 it("renders successive chapters together without chapter-turn buttons", async () => {

@@ -1,6 +1,7 @@
 import { useSentenceMarks } from "./useSentenceMarks";
 import { useTranslations } from "./useTranslations";
 import { readerLayout, updateReaderLayout } from "../neoread-layout";
+import { useReaderStore } from "../store";
 import {
   useEffect,
   useLayoutEffect,
@@ -18,6 +19,7 @@ import type {
   ReadingAnchor,
   ReaderSelection,
   Processing,
+  TranslationView,
 } from "@neoread/core";
 import { api, publicationURL } from "@neoread/api";
 import { Tabs, TabsList, TabsTrigger } from "@neoread/ui/components/tabs";
@@ -38,7 +40,6 @@ import { defaultTheme } from "@neoread/core";
 import { translationFont } from "../appearance";
 import "./translation.css";
 
-type Mode = "source" | "parallel" | "translation";
 export function EPUBReadingView({
   document: doc,
   active = true,
@@ -54,7 +55,9 @@ export function EPUBReadingView({
   processing?: Processing;
   pageNavigation?: ReactNode;
 }) {
-  const [mode, setMode] = useState<Mode>("source");
+  const mode = useReaderStore(
+    (state) => readerLayout(state.theme.readerLayout).translationView,
+  );
   const { swapped, sourceWidth } = readerLayout(theme.readerLayout);
   const [blocks, setBlocks] = useState<EPUBReadingBlock[]>([]);
   const [chapter, setChapter] = useState(
@@ -436,12 +439,12 @@ export function EPUBReadingView({
       }
     });
   };
-  const changeMode = (value: Mode) => {
+  const changeMode = (value: TranslationView) => {
     clear();
     input(value === "translation" ? "translation" : "source");
     hover("source");
     hover("translation");
-    setMode(value);
+    updateReaderLayout({ translationView: value });
     side.current = value === "translation" ? "translation" : "source";
     const target = position.current;
     cancelAnimationFrame(modeFrame.current);
@@ -465,7 +468,10 @@ export function EPUBReadingView({
         library="books"
         epubChapter={() => position.current}
       />
-      <Tabs value={mode} onValueChange={(value) => changeMode(value as Mode)}>
+      <Tabs
+        value={mode}
+        onValueChange={(value) => changeMode(value as TranslationView)}
+      >
         <TabsList>
           <TabsTrigger value="source">仅原文</TabsTrigger>
           <TabsTrigger value="parallel">原文译文</TabsTrigger>
