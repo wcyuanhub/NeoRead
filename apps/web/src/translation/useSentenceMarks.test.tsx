@@ -335,6 +335,29 @@ it("keeps a stationary hover after a child mutation and a parent render", async 
   expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
 });
 
+it.each(["pdf-layout-sheet", "pdf-layout-body"])(
+  "invalidates hover geometry when %s changes size without replacing text",
+  async (className) => {
+    await act(async () => root.render(<App />));
+    const section = host.querySelector<HTMLElement>(
+      "[data-translation-block]",
+    )!;
+    section.className = className;
+    await pointer("[data-sentence]", "pointermove", 210);
+    expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+    const reads = vi.spyOn(Range.prototype, "getClientRects");
+    reads.mockClear();
+    await act(async () => {
+      section.style.fontSize = "8px";
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(hover()).toBeUndefined();
+    await pointer("[data-sentence]", "pointermove", 210);
+    expect(reads).toHaveBeenCalled();
+    expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+  },
+);
+
 it("coalesces pointer bursts and ignores block-overlay mutations without rematching PDF text", async () => {
   const matching = vi.spyOn(engine, "sentenceRanges");
   const reads = vi.spyOn(Range.prototype, "getClientRects");

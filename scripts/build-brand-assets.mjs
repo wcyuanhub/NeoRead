@@ -139,6 +139,8 @@ try {
     join(assets, "icons/macos/icon.icns"),
     iconset,
   ]);
+  // Unpackaged desktop runs cannot read .icns, so keep a PNG of the same tile.
+  png(source.macos, join(assets, "icons/macos/icon-1024.png"), 1024);
 
   // Windows .ico: full-bleed tile, which is how Windows 11 app icons sit in the taskbar.
   await mkdir(join(assets, "icons/windows"), { recursive: true });
@@ -156,6 +158,8 @@ try {
 
   // Website favicons. Pages deploys only website/, so these are copies, not links.
   await write(join(website, "favicon.svg"), favicon);
+  // Browser-tab icon for the renderer; Vite copies public/ into apps/web/dist.
+  await write(join(root, "apps/web/public/favicon.svg"), favicon);
   const ico = [];
   for (const size of [16, 32, 48]) {
     const frame = join(tmp, `fav-${size}.png`);

@@ -69,7 +69,7 @@ pnpm package      # 构建 DMG 或 NSIS 安装包，并执行相同检查
 
 处理器构建先按 `apps/processor/model.json` 的固定 revision 获取权重，并核对 67,372,587 字节的大小和 SHA256。通过校验后才将临时文件发布到 `apps/processor/models/` 构建缓存；网络中断、大小或哈希不符会清理临时文件并停止构建；进程被强制终止时可能留下 `.part` 文件，但不会作为模型使用。已有缓存每次校验，损坏时需删除该缓存文件后重建；不静默覆盖。构建将当前模型和 `model-license/` 下的许可、来源说明复制到 `dist/models/`，打包时放入应用资源的 `processor/models/`，不放进 `app.asar`。权重、构建缓存和安装包均不进入 Git，Git 只管理模型规格、脚本与许可说明。
 
-构建机器首次需要联网，之后可复用已校验的缓存。GitHub Actions 按模型规格文件的哈希缓存权重。完全离线构建时，将环境变量 `NEOREAD_BUILD_LAYOUT_MODEL` 设为已有权重的绝对路径；该文件必须与固定模型的大小和 SHA256 一致，校验失败不会回退下载。`pnpm dev`、`pnpm desktop` 和单独的处理器构建使用同一流程；`pnpm install`、类型检查和普通单元测试不获取权重。
+构建机器首次需要联网，之后可复用已校验的缓存。GitHub Actions 按模型规格文件的哈希缓存权重。完全离线构建时，将环境变量 `NEOREAD_BUILD_LAYOUT_MODEL` 设为已有权重的绝对路径；该文件必须与固定模型的大小和 SHA256 一致，校验失败不会回退下载。无法直连 huggingface.co 时可设 `HF_ENDPOINT` 为兼容的镜像站点（例如 `https://hf-mirror.com`），下载后仍执行同样的校验。`pnpm dev`、`pnpm desktop` 和单独的处理器构建使用同一流程；`pnpm install`、类型检查和普通单元测试不获取权重。
 
 运行时从处理器旁的 `models/` 读取模型并核对完整性，不联网获取，也不在每个书库复制权重。缺失或损坏时解析失败，需要重新构建或安装应用。旧版书库里的模型缓存保留，但不再使用或自动删除。
 

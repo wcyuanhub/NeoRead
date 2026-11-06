@@ -16,13 +16,19 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import type { PDFBlock, TranslationBlock } from "@neoread/core";
-import { pdfFontAscent } from "../../../../packages/neoread-core/src/pdf-text";
 import type {
   DocumentInitParameters,
   PDFDocumentLoadingTask,
   PDFPageProxy,
 } from "pdfjs-dist/types/src/display/api";
-import { fitText, overlaps, validRect, type Rect } from "./pdf-layout";
+import { fitText, overlaps, type Rect } from "./pdf-layout";
+import {
+  blockGeometry,
+  isWhitePaper,
+  pageBox,
+  preferredFontSize,
+  textSpans,
+} from "./pdf-page-layout";
 import { splitLegacyCaptions } from "./pdf-captions";
 import { matchesSource, preservedLabels } from "./pdf-content";
 import { preparePDFText } from "./pdf-math";
@@ -59,25 +65,6 @@ function browserCanvas(width: number, height: number): ExportCanvas {
   };
 }
 
-function pageBox(block: PDFBlock, width: number, height: number): Rect {
-  const b = block.bounds;
-  return {
-    x: b.x * width,
-    y: b.y * height,
-    width: b.width * width,
-    height: b.height * height,
-  };
-}
-
-function contains(outer: Rect, inner: Rect, tolerance = 0): boolean {
-  return (
-    inner.x >= outer.x - tolerance &&
-    inner.y >= outer.y - tolerance &&
-    inner.x + inner.width <= outer.x + outer.width + tolerance &&
-    inner.y + inner.height <= outer.y + outer.height + tolerance
-  );
-}
-
 /** Original link hotspots no longer identify the same words after reflow. */
 function removeCoveredLinks(page: PDFPage, source: PDFPageProxy, mask: Rect) {
   const annotations = page.node.Annots();
@@ -108,76 +95,6 @@ function removeCoveredLinks(page: PDFPage, source: PDFPageProxy, mask: Rect) {
     )
       annotations.remove(index);
   }
-}
-
-/** Only neutral white paper is covered. Keep tinted backgrounds/figures unchanged. */
-function isWhitePaper(
-  context: CanvasRenderingContext2D,
-  box: Rect,
-  scale: number,
-): boolean {
-  const x = Math.max(0, Math.floor(box.x * scale));
-  const y = Math.max(0, Math.floor(box.y * scale));
-  const width = Math.max(1, Math.ceil((box.x + box.width) * scale) - x);
-  const height = Math.max(1, Math.ceil((box.y + box.height) * scale) - y);
-  const { data } = context.getImageData(x, y, width, height);
-  let white = 0,
-    colored = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const low = Math.min(data[i], data[i + 1], data[i + 2]);
-    const high = Math.max(data[i], data[i + 1], data[i + 2]);
-    if (low >= 248) white++;
-    if (high - low > 16) colored++;
-  }
-  const pixels = data.length / 4;
-  return white / pixels > 0.65 && colored / pixels < 0.005;
-}
-
-async function textSpans(page: PDFPageProxy) {
-  const viewport = page.getViewport({ scale: 1 });
-  const content = await page.getTextContent();
-  return content.items.flatMap((item) => {
-    if (!("str" in item) || !item.str.trim()) return [];
-    const [a, b, c, d, e, f] = item.transform;
-    const origin = viewport.convertToViewportPoint(e, f);
-    const advance = Math.hypot(a, b);
-    if (!advance) return [];
-    const end = viewport.convertToViewportPoint(
-      e + (item.width * a) / advance,
-      f + (item.width * b) / advance,
-    );
-    const top = viewport.convertToViewportPoint(e + c, f + d);
-    const up = [top[0] - origin[0], top[1] - origin[1]];
-    const fontSize = Math.hypot(...up);
-    const ascent = pdfFontAscent(content.styles[item.fontName]);
-    // Four corners are required: treating vertical margin text as horizontal
-    // invents a page-wide box that falsely overlaps otherwise safe paragraphs.
-    const corners = [origin, end].flatMap((point) =>
-      [ascent, ascent - 1].map((factor) => [
-        point[0] + up[0] * factor,
-        point[1] + up[1] * factor,
-      ]),
-    );
-    const xs = corners.map((p) => p[0]),
-      ys = corners.map((p) => p[1]);
-    return [
-      {
-        box: {
-          x: Math.min(...xs),
-          y: Math.min(...ys),
-          width: Math.max(...xs) - Math.min(...xs),
-          height: Math.max(...ys) - Math.min(...ys),
-        },
-        text: item.str,
-        size: fontSize,
-        horizontal:
-          end[0] > origin[0] &&
-          Math.abs(end[1] - origin[1]) < 0.01 &&
-          up[1] < 0 &&
-          Math.abs(up[0]) < 0.01,
-      },
-    ];
-  });
 }
 
 /**
@@ -300,75 +217,17 @@ export async function translatedPDF(
             continue;
           }
           const box = boxes[index];
-          if (
-            !validRect(box) ||
-            !contains({ x: 0, y: 0, width, height }, box)
-          ) {
-            issue("bounds");
+          const geometry = blockGeometry(boxes, index, spans, width, height);
+          if (!geometry.mask) {
+            issue(geometry.reason);
             continue;
           }
-          const localSpans = spans.filter((s) => overlaps(s.box, box));
-          // Layout detection and font metrics can disagree slightly, especially
-          // for mathematical scripts. Grow the erasure to the measured glyphs,
-          // but reject large mismatches and any newly covered neighboring content.
-          if (
-            !localSpans.length ||
-            localSpans.some(
-              (s) =>
-                !s.horizontal ||
-                !contains(box, s.box, Math.min(4, s.size * 0.35)),
-            )
-          ) {
-            issue("source");
-            continue;
-          }
-          const left = Math.max(
-            0,
-            Math.min(box.x, ...localSpans.map((s) => s.box.x)) - 0.75,
-          );
-          const top = Math.max(
-            0,
-            Math.min(box.y, ...localSpans.map((s) => s.box.y)) - 0.75,
-          );
-          const maskRight = Math.min(
-            width,
-            Math.max(
-              box.x + box.width,
-              ...localSpans.map((s) => s.box.x + s.box.width),
-            ) + 0.75,
-          );
-          const bottom = Math.min(
-            height,
-            Math.max(
-              box.y + box.height,
-              ...localSpans.map((s) => s.box.y + s.box.height),
-            ) + 0.75,
-          );
-          const mask = {
-            x: left,
-            y: top,
-            width: maskRight - left,
-            height: bottom - top,
-          };
-          if (
-            boxes.some((other, j) => j !== index && overlaps(mask, other)) ||
-            spans.some((s) => !localSpans.includes(s) && overlaps(mask, s.box))
-          ) {
-            issue("overlap");
-            continue;
-          }
+          const { mask, localSpans } = geometry;
           if (!content.supported) {
             issue("font");
             continue;
           }
-          // Many short superscripts must not outweigh the main text when
-          // choosing the paragraph size. Weight the median by horizontal extent.
-          const orderedSpans = [...localSpans].sort((a, b) => a.size - b.size);
-          let remainingWidth =
-            orderedSpans.reduce((sum, s) => sum + s.box.width, 0) / 2;
-          const preferredSize = orderedSpans.find(
-            (s) => (remainingWidth -= s.box.width) <= 0,
-          )!.size;
+          const preferredSize = preferredFontSize(localSpans);
           const layout = fitText(
             content.text,
             box,

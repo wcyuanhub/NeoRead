@@ -72,6 +72,11 @@ export function wrapText(
   return lines;
 }
 
+export function textSizeRange(preferredSize: number) {
+  const maximum = Math.max(6, Math.min(32, preferredSize));
+  return { maximum, minimum: Math.max(6, (maximum * 65) / 100) };
+}
+
 /** No clipping or horizontal distortion. A failed fit leaves the original intact. */
 export function fitText(
   text: string,
@@ -81,9 +86,8 @@ export function fitText(
   lineHeightRatio = 1.25,
 ): TextLayout | null {
   if (!text.trim() || !validRect(box)) return null;
-  const maximum = Math.max(6, Math.min(32, preferredSize));
-  const minimum = Math.max(6, maximum * 0.65);
-  for (let size = maximum; size >= minimum - 0.001; size -= 0.25) {
+  const { maximum, minimum } = textSizeRange(preferredSize);
+  for (let size = maximum; ; size = Math.max(minimum, size - 0.25)) {
     const lineHeight = size * lineHeightRatio;
     const lines = wrapText(
       text,
@@ -94,6 +98,7 @@ export function fitText(
     );
     if (lines && lines.length * lineHeight <= box.height + 0.01)
       return { lines, size, lineHeight };
+    if (size === minimum) break;
   }
   return null;
 }

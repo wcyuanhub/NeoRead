@@ -8,6 +8,7 @@ import {
   dialog,
   ipcMain,
   session,
+  nativeImage,
   nativeTheme,
   shell,
 } from "electron";
@@ -44,6 +45,7 @@ import {
 } from "./proxy-settings";
 import { startUpdateService } from "./update-service";
 import { devIsolation } from "./dev-isolation";
+import { devIconPath } from "./dev-icon";
 import { documentArguments, documentFile } from "./open-files";
 import {
   migrateReaderData,
@@ -462,6 +464,10 @@ app
   .whenReady()
   .then(async () => {
     if (!primary) return;
+    // A `pnpm desktop` run uses Electron's bundle, so supply the brand tile;
+    // packaged builds already carry the .icns.
+    if (!app.isPackaged && process.platform === "darwin")
+      app.dock?.setIcon(nativeImage.createFromPath(devIconPath(__dirname)));
     diagnostics = startDiagnosticService(
       () => window,
       () => activeLibrary,
