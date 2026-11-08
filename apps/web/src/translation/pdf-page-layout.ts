@@ -47,7 +47,14 @@ export function contains(outer: Rect, inner: Rect, tolerance = 0): boolean {
   );
 }
 
-/** Only neutral white paper is covered. Keep tinted backgrounds/figures unchanged. */
+/**
+ * Only neutral white paper is covered. Keep tinted backgrounds/figures
+ * unchanged. Stray ink is tolerated only in trace amounts: glyph antialiasing
+ * and inline-math overhang bleed a little past a measured span, while artwork
+ * or a shaded panel never does.
+ */
+const strayInkTolerance = 0.01;
+
 export function isWhitePaper(
   context: CanvasRenderingContext2D,
   box: Rect,
@@ -60,12 +67,16 @@ export function isWhitePaper(
   const height = Math.max(1, Math.ceil((box.y + box.height) * scale) - y);
   const { data } = context.getImageData(x, y, width, height);
   let white = 0,
-    colored = 0;
+    colored = 0,
+    stray = 0;
   for (let i = 0; i < data.length; i += 4) {
     const low = Math.min(data[i], data[i + 1], data[i + 2]);
     const high = Math.max(data[i], data[i + 1], data[i + 2]);
-    if (low >= 248) white++;
-    else if (textBoxes) {
+    if (low >= 248) {
+      white++;
+      continue;
+    }
+    if (textBoxes) {
       const px = (x + ((i / 4) % width) + 0.5) / scale;
       const py = (y + Math.floor(i / 4 / width) + 0.5) / scale;
       if (
@@ -77,12 +88,16 @@ export function isWhitePaper(
             py <= text.y + text.height,
         )
       )
-        return false;
+        stray++;
     }
     if (high - low > 16) colored++;
   }
   const pixels = data.length / 4;
-  return white / pixels > 0.65 && colored / pixels < 0.005;
+  return (
+    white / pixels > 0.65 &&
+    colored / pixels < 0.005 &&
+    stray / pixels <= strayInkTolerance
+  );
 }
 
 export async function textSpans(page: PDFPageProxy): Promise<TextSpan[]> {
@@ -433,15 +448,16 @@ export async function pageBlockLayouts(
     if (Number.isFinite(renderScale) && renderScale > 0) {
       try {
         // Ink outside measured text may be an unsegmented monochrome figure.
+        const bleed = 1 + layout.fontSize / 4;
         white = isWhitePaper(
           context,
           geometry.mask,
           renderScale,
           local.map(({ box }) => ({
-            x: box.x - 1,
-            y: box.y - 1,
-            width: box.width + 2,
-            height: box.height + 2,
+            x: box.x - bleed,
+            y: box.y - bleed,
+            width: box.width + bleed * 2,
+            height: box.height + bleed * 2,
           })),
         );
       } catch {

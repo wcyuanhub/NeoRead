@@ -152,6 +152,32 @@ describe("safe page masks", () => {
     expect(result.get("body")?.reason).toBe("background");
   });
 
+  it("covers text whose antialiased halo reaches past the measured span", async () => {
+    const fixture = pageFixture([text(30, 50, 100)]);
+    const surface = canvas((x, y) =>
+      x >= 28 && x <= 132 && y >= 40 && y <= 54
+        ? x >= 30 && x <= 130 && y >= 42 && y <= 52
+          ? [255, 255, 255, 255]
+          : [120, 120, 120, 255]
+        : [255, 255, 255, 255],
+    );
+    expect(
+      (await layout(fixture, [block()], surface)).get("body")?.mask,
+    ).toBeDefined();
+  });
+
+  it("covers a paragraph with only trace ink beyond the measured text", async () => {
+    const fixture = pageFixture([text(30, 50, 100)]);
+    const surface = canvas((x, y) =>
+      x >= 145 && x <= 149 && y >= 46 && y <= 51
+        ? [0, 0, 0, 255]
+        : [255, 255, 255, 255],
+    );
+    expect(
+      (await layout(fixture, [block()], surface)).get("body")?.mask,
+    ).toBeDefined();
+  });
+
   it("keeps columns separate even when PDF.js emits interleaved runs", async () => {
     const left = block("left");
     const right = block("right", { x: 220, y: 40, width: 150, height: 45 });
