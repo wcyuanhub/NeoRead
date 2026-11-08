@@ -28,7 +28,7 @@ import {
   PopoverTrigger,
 } from "@neoread/ui/components/popover";
 import { pageBlockLayouts, type PageBlockLayout } from "./pdf-page-layout";
-import { fitTranslatedElement } from "./pdf-dom-fit";
+import { fitTranslatedElement, type TextFit } from "./pdf-dom-fit";
 import { matchesSource, preservedLabels } from "./pdf-content";
 import { pdfObjectColors } from "../readers/pdf-dark-mode";
 import { pageViewport, followPageViewport } from "../readers/pdf-page-viewport";
@@ -455,6 +455,9 @@ const maskReasons: Record<NonNullable<PageBlockLayout["reason"]>, string> = {
   preserved: "此区域保留原版",
 };
 
+/** The box holds the translation only in a size smaller than the original. */
+const unreadableReason = "译文区域偏小，字号将难以阅读";
+
 function LayoutBlock({
   block,
   layout,
@@ -486,7 +489,7 @@ function LayoutBlock({
   const [verified, setVerified] = useState<{ text: string; hash: string }>();
   const matches =
     verified?.text === sourceText && verified?.hash === translation?.sourceHash;
-  const [fits, setFits] = useState<boolean>();
+  const [fit, setFit] = useState<TextFit>();
   const complete =
     translation?.status === "complete" && !!translation.sentences.length;
   useEffect(() => {
@@ -505,25 +508,25 @@ function LayoutBlock({
   }, [sourceText, translation?.sourceHash, complete]);
   useLayoutEffect(() => {
     const node = body.current;
-    setFits(undefined);
+    setFit(undefined);
     if (!node || !layout?.mask || !matches || !complete) return;
     let frame = 0;
     let stopped = false;
-    const fit = () => {
+    const measure = () => {
       if (stopped) return;
-      setFits(
+      setFit(
         fitTranslatedElement(
           node,
           layout.box.width,
           layout.box.height,
           layout.fontSize,
           layout.lineHeight,
-        ) !== null,
+        ),
       );
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(fit);
+      frame = requestAnimationFrame(measure);
     };
     const mutations = new MutationObserver(schedule);
     mutations.observe(node, {
@@ -550,16 +553,19 @@ function LayoutBlock({
     width: block.bounds.width * size.width,
     height: block.bounds.height * size.height,
   };
-  const covered = !preserved && !!layout?.mask && matches && fits === true;
+  const covered = !preserved && !!layout?.mask && matches && fit?.size != null;
+  const unreadable = fit?.size === null && fit.reason === "unreadable";
   const reason = !complete
     ? "尚未完成翻译"
     : !matches
       ? "译文与原文不匹配"
       : preserved
         ? maskReasons.preserved
-        : layout?.mask
-          ? "译文超出原区域"
-          : maskReasons[layout?.reason ?? "preserved"];
+        : unreadable
+          ? unreadableReason
+          : layout?.mask
+            ? "译文超出原区域"
+            : maskReasons[layout?.reason ?? "preserved"];
   return (
     <>
       {covered && (

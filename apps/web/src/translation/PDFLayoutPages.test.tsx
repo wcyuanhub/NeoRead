@@ -197,7 +197,7 @@ beforeEach(() => {
     (id, file) => `/mock/${id}/${file}`,
   );
   vi.mocked(matchesSource).mockResolvedValue(true);
-  vi.mocked(fitTranslatedElement).mockReturnValue(12);
+  vi.mocked(fitTranslatedElement).mockReturnValue({ size: 12 });
   vi.mocked(pageBlockLayouts).mockImplementation(
     async (_page, blocks) => new Map(blocks.map((item) => [item.id, layout()])),
   );
@@ -714,11 +714,19 @@ describe("safe translation coverage and full-text fallback", () => {
     expect(host.querySelector(".pdf-layout-expand")).toBeNull();
   });
 
-  it.each(["overflow", "unsafe region"])(
+  it.each(["overflow", "unreadable text", "unsafe region"])(
     "preserves the original for %s and opens the complete translation with retry",
     async (reason) => {
       if (reason === "overflow")
-        vi.mocked(fitTranslatedElement).mockReturnValue(null);
+        vi.mocked(fitTranslatedElement).mockReturnValue({
+          size: null,
+          reason: "overflow",
+        });
+      else if (reason === "unreadable text")
+        vi.mocked(fitTranslatedElement).mockReturnValue({
+          size: null,
+          reason: "unreadable",
+        });
       else
         vi.mocked(pageBlockLayouts).mockResolvedValue(
           new Map([[block.id, layout({ mask: undefined })]]),
@@ -728,7 +736,11 @@ describe("safe translation coverage and full-text fallback", () => {
       await fitFrame();
       expectUncovered();
       const popover = await openTranslation(
-        reason === "overflow" ? "译文超出原区域" : "此区域保留原版",
+        reason === "overflow"
+          ? "译文超出原区域"
+          : reason === "unreadable text"
+            ? "译文区域偏小，字号将难以阅读"
+            : "此区域保留原版",
       );
       expect(popover.textContent).toContain("完整译文的第一句。");
       expect(popover.textContent).toContain("完整译文的最后一句。");

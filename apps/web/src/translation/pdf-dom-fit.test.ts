@@ -46,9 +46,9 @@ describe("fitTranslatedElement", () => {
         width: Math.ceil(size * 2),
         height: Math.ceil(size * lineHeight),
       }));
-      expect(fitTranslatedElement(element, 100, 100, preferred, 1.25)).toBe(
-        expected,
-      );
+      expect(fitTranslatedElement(element, 100, 100, preferred, 1.25)).toEqual({
+        size: expected,
+      });
       expect(sizes).toEqual([expected]);
       expect(element.style.fontSize).toBe(`${expected}px`);
       expect(element.style.width).toBe("100px");
@@ -66,9 +66,9 @@ describe("fitTranslatedElement", () => {
         width: Math.ceil(size * 10),
         height: Math.ceil(size * lineHeight * 2),
       }));
-      expect(fitTranslatedElement(element, width, height, 20, 1.25)).toBe(
-        expected,
-      );
+      expect(fitTranslatedElement(element, width, height, 20, 1.25)).toEqual({
+        size: expected,
+      });
       expect(sizes).toEqual(
         Array.from(
           { length: (20 - expected) / 0.25 + 1 },
@@ -83,9 +83,11 @@ describe("fitTranslatedElement", () => {
 
   it.each([
     { preferred: 8, minimum: 6 },
+    { preferred: 10, minimum: 9 },
+    { preferred: 12, minimum: 9 },
     { preferred: 20, minimum: 13 },
   ])(
-    "accepts an exact fit at the readability floor ($minimum px)",
+    "accepts an exact fit at the readable minimum ($preferred → $minimum px)",
     ({ preferred, minimum }) => {
       const { element, sizes } = createMeasuredElement((size) => ({
         width: Math.ceil(size * 100),
@@ -93,28 +95,18 @@ describe("fitTranslatedElement", () => {
       }));
       expect(
         fitTranslatedElement(element, minimum * 100, 100, preferred, 1.25),
-      ).toBe(minimum);
+      ).toEqual({ size: minimum });
       expect(sizes.at(-1)).toBe(minimum);
       expect(sizes.every((size) => size >= minimum)).toBe(true);
     },
   );
 
-  it("tries the exact readability floor when it is not on the quarter-pixel grid", () => {
-    // A 12 px preference has a 65% floor of 7.8 px, not 8 px.
-    const { element } = createMeasuredElement((size) => ({
-      width: Math.ceil(size * 100),
-      height: Math.ceil(size * 2),
-    }));
-    expect(fitTranslatedElement(element, 780, 100, 12, 1.25)).toBeCloseTo(7.8);
-    expect(element.style.fontSize).toBe("7.8px");
-  });
-
   it.each([
-    { preferred: 8, minimum: 6 },
-    { preferred: 12, minimum: 7.8 },
-    { preferred: 20, minimum: 13 },
+    { preferred: 10, minimum: 9 },
+    { preferred: 12, minimum: 9 },
+    { preferred: 13, minimum: 9 },
   ])(
-    "never shrinks below the readability floor ($minimum px) to force a fit",
+    "reports unreadable instead of publishing below the minimum ($preferred px)",
     ({ preferred, minimum }) => {
       const { element, sizes } = createMeasuredElement((size) => ({
         width: Math.ceil(size * 100),
@@ -122,29 +114,41 @@ describe("fitTranslatedElement", () => {
       }));
       expect(
         fitTranslatedElement(element, minimum * 100 - 1, 100, preferred, 1.25),
-      ).toBeNull();
+      ).toEqual({ size: null, reason: "unreadable" });
       expect(sizes.length).toBeGreaterThan(1);
-      expect(sizes.every((size) => size >= minimum && size <= preferred)).toBe(
-        true,
-      );
-      expect(Number.parseFloat(element.style.fontSize)).toBeGreaterThanOrEqual(
-        minimum,
-      );
+      expect(sizes.at(-1)).toBeLessThan(minimum);
     },
   );
+
+  it("probes to the absolute floor before reporting a fit as unreadable", () => {
+    // A 12 px preference has a 65% floor of 7.8 px, not 8 px.
+    const { element, sizes } = createMeasuredElement((size) => ({
+      width: Math.ceil(size * 100),
+      height: Math.ceil(size * 2),
+    }));
+    expect(fitTranslatedElement(element, 780, 100, 12, 1.25)).toEqual({
+      size: null,
+      reason: "unreadable",
+    });
+    expect(sizes.at(-1)).toBeCloseTo(7.8);
+    expect(element.style.fontSize).toBe("7.8px");
+  });
 
   it.each([
     { axis: "width", width: 59, height: 100 },
     { axis: "height", width: 100, height: 59 },
     { axis: "both axes", width: 59, height: 59 },
   ])(
-    "returns null for $axis overflow even at the minimum size",
+    "reports $axis overflow once even the absolute floor fails",
     ({ width, height }) => {
       const { element, sizes } = createMeasuredElement((size) => ({
         width: Math.ceil(size * 10),
         height: Math.ceil(size * 10),
       }));
-      expect(fitTranslatedElement(element, width, height, 8, 1.25)).toBeNull();
+      expect(fitTranslatedElement(element, width, height, 8, 1.25)).toEqual({
+        size: null,
+        reason: "overflow",
+      });
       expect(sizes.at(-1)).toBe(6);
       expect(element.style.fontSize).toBe("6px");
     },
@@ -161,8 +165,10 @@ describe("fitTranslatedElement", () => {
         width: Math.ceil((size / 6) * width),
         height: Math.ceil((size / 6) * height),
       }));
-      expect(fitTranslatedElement(element, 100.2, 50.9, 6, 1.25)).toBe(
-        expected,
+      expect(fitTranslatedElement(element, 100.2, 50.9, 6, 1.25)).toEqual(
+        expected === null
+          ? { size: null, reason: "overflow" }
+          : { size: expected },
       );
       expect(element.style.width).toBe("100.2px");
     },
@@ -187,7 +193,9 @@ describe("fitTranslatedElement", () => {
           height: Math.ceil(size * lineHeight),
         };
       });
-      expect(fitTranslatedElement(element, 100, 100, 12, requested)).toBe(12);
+      expect(fitTranslatedElement(element, 100, 100, 12, requested)).toEqual({
+        size: 12,
+      });
       expect(element.style.lineHeight).toBe(String(expected));
       expect(measuredLineHeights.length).toBeGreaterThan(0);
       expect(measuredLineHeights.every((value) => value === expected)).toBe(
@@ -197,9 +205,9 @@ describe("fitTranslatedElement", () => {
   );
 
   it.each([
-    { lineHeight: 0, expected: 20 },
-    { lineHeight: 1.25, expected: 19 },
-    { lineHeight: 4, expected: 15 },
+    { lineHeight: 0, expected: { size: 20 } },
+    { lineHeight: 1.25, expected: { size: 19 } },
+    { lineHeight: 4, expected: { size: 15 } },
   ])(
     "accounts for the clamped line height when fitting ($lineHeight)",
     ({ lineHeight, expected }) => {
@@ -207,7 +215,7 @@ describe("fitTranslatedElement", () => {
         width: Math.ceil(size * 2),
         height: Math.ceil(size * ratio),
       }));
-      expect(fitTranslatedElement(element, 100, 24, 20, lineHeight)).toBe(
+      expect(fitTranslatedElement(element, 100, 24, 20, lineHeight)).toEqual(
         expected,
       );
       expect(element.scrollHeight).toBeLessThanOrEqual(24);
@@ -215,8 +223,8 @@ describe("fitTranslatedElement", () => {
   );
 
   it.each([
-    { box: 80, expected: 8 },
-    { box: 59, expected: null },
+    { box: 80, expected: { size: 8 } },
+    { box: 59, expected: { size: null, reason: "overflow" } },
   ])(
     "preserves the complete DOM without clipping on success or overflow ($expected)",
     ({ box, expected }) => {
@@ -230,7 +238,9 @@ describe("fitTranslatedElement", () => {
       const originalHTML = element.innerHTML;
       const originalChildren = [...element.childNodes];
 
-      expect(fitTranslatedElement(element, box, box, 8, 1.25)).toBe(expected);
+      expect(fitTranslatedElement(element, box, box, 8, 1.25)).toEqual(
+        expected,
+      );
       expect(element.innerHTML).toBe(originalHTML);
       expect(element.childNodes.length).toBe(originalChildren.length);
       originalChildren.forEach((child, index) => {
