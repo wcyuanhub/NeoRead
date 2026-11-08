@@ -109,6 +109,16 @@
   font-size: 16px;
   line-height: 1.8;
 }
+.pdf-layout-loading {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin: 2px 0 0;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
 .pdf-layout-message {
   padding: 24px;
   font-size: 14px;

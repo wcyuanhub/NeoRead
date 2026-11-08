@@ -260,6 +260,7 @@ function LayoutPage({
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [pending, setPending] = useState(false);
   const zoom = scale * (96 / 72);
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -300,6 +301,7 @@ function LayoutPage({
             translations={translations}
             documentId={documentId}
             renderBlock={renderBlock}
+            onPending={setPending}
             onRetry={onRetry}
             onCitation={onCitation}
             paused={paused}
@@ -320,6 +322,11 @@ function LayoutPage({
           ))
         )}
       </div>
+      {visible && pending && (
+        <p className="pdf-layout-loading" role="status">
+          正在计算译文排版…
+        </p>
+      )}
     </div>
   );
 }
@@ -334,6 +341,7 @@ function PageSurface({
   translations,
   documentId,
   renderBlock,
+  onPending,
   onRetry,
   onCitation,
   paused,
@@ -347,6 +355,7 @@ function PageSurface({
   translations: Map<string, TranslationBlock>;
   documentId: string;
   renderBlock: RenderBlock;
+  onPending: (pending: boolean) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [layouts, setLayouts] = useState<Map<string, PageBlockLayout>>();
@@ -417,6 +426,18 @@ function PageSurface({
     blockKey,
     retry,
   ]);
+  useEffect(() => {
+    if (layouts || error) {
+      onPending(false);
+      return;
+    }
+    const timer = setTimeout(() => onPending(true), layoutHintDelay);
+    // Leaving the page must not leave a stale hint behind for the next mount.
+    return () => {
+      clearTimeout(timer);
+      onPending(false);
+    };
+  }, [layouts, error, onPending]);
   return (
     <>
       <canvas ref={canvas} className="pdf-layout-canvas" aria-hidden="true" />
@@ -445,6 +466,9 @@ function PageSurface({
     </>
   );
 }
+
+/** Pages that render within a blink never show the hint; only slow ones earn it. */
+const layoutHintDelay = 400;
 
 /** Why a block keeps the original text; each case needs a different fix. */
 const maskReasons: Record<NonNullable<PageBlockLayout["reason"]>, string> = {

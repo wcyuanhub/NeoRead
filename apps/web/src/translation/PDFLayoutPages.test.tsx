@@ -681,6 +681,61 @@ describe("visible page canvas rendering", () => {
   );
 });
 
+describe("page-level waiting hint", () => {
+  const advance = (milliseconds: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(milliseconds);
+    });
+
+  it("mentions the layout calculation only for a slow page, then clears on readiness", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = deferred<Map<string, PageBlockLayout>>();
+      vi.mocked(pageBlockLayouts).mockReturnValueOnce(pending.promise);
+      await render();
+      await visible();
+      await advance(399);
+      expect(host.querySelector(".pdf-layout-loading")).toBeNull();
+      await advance(1);
+      const hint = host.querySelector(".pdf-layout-loading");
+      expect(hint?.textContent).toContain("正在计算译文排版");
+      expect(hint?.getAttribute("role")).toBe("status");
+      expectUncovered();
+      await act(async () => pending.resolve(new Map([[block.id, layout()]])));
+      expect(host.querySelector(".pdf-layout-loading")).toBeNull();
+      await fitFrame();
+      expect(host.querySelector(".pdf-layout-mask")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["scrolling away", "a failed page"])(
+    "drops the waiting hint after %s and does not flash it on return",
+    async (interruption) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const pending = deferred<Map<string, PageBlockLayout>>();
+        vi.mocked(pageBlockLayouts).mockReturnValue(pending.promise);
+        await render();
+        await visible();
+        await advance(400);
+        expect(host.querySelector(".pdf-layout-loading")).not.toBeNull();
+        if (interruption === "scrolling away") await visible(1, false);
+        else await act(async () => pending.reject(new Error("bad layout")));
+        expect(host.querySelector(".pdf-layout-loading")).toBeNull();
+        if (interruption === "a failed page")
+          expect(host.querySelector('[role="alert"]')).not.toBeNull();
+        await visible();
+        await advance(399);
+        expect(host.querySelector(".pdf-layout-loading")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+});
+
 describe("safe translation coverage and full-text fallback", () => {
   it("masks only after completion, source verification and a successful fit, retaining section metadata", async () => {
     const matching = deferred<boolean>();
