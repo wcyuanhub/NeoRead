@@ -186,7 +186,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it.each(["取消", "Close"])(
+it.each(["取消", "关闭"])(
   "keeps one export dialog across progress refreshes and removes it with %s",
   async (close) => {
     await act(async () => render(0));

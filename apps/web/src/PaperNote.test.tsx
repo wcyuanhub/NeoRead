@@ -136,7 +136,7 @@ it("does not save or normalize a note merely by opening, switching modes, focusi
   ).toBe(original);
   await act(async () => button("编辑").click());
   await waitForRich();
-  await act(async () => button("Close").click());
+  await act(async () => button("关闭").click());
   await act(async () => button("源码").click());
   expect(field().value).toBe(original);
   expect(api.saveDocumentNote).not.toHaveBeenCalled();
@@ -183,7 +183,7 @@ it("shares mixed Chinese/English rich edits immediately with source, export and 
     await flushPaperNotes();
   });
   expect(await flushPaperNote(noteId)).toBe("## Source 中文\n\n$x_{2}$\n");
-  await act(async () => button("Close").click());
+  await act(async () => button("关闭").click());
   await act(async () => button("展开论文笔记").click());
   await waitForRich();
   expect(richField()!.textContent).toContain("Source 中文");
@@ -231,7 +231,7 @@ it("isolates pending editor mounts under StrictMode and fast source switching", 
     document.querySelectorAll(".paper-note-rich .ProseMirror"),
   ).toHaveLength(1);
   expect(richField()!.textContent).toContain("latest 快速切换");
-  await act(async () => button("Close").click());
+  await act(async () => button("关闭").click());
   await waitForRich();
   expect(
     document.querySelectorAll(".paper-note-rich .ProseMirror"),
@@ -325,7 +325,7 @@ it("preserves the exact draft and returns focus after expanded editing", async (
     'textarea[aria-label="编辑论文笔记"]',
   )!;
   await act(async () => type(editor, raw));
-  await act(async () => button("Close").click());
+  await act(async () => button("关闭").click());
   await act(async () => {
     await vi.waitFor(() =>
       expect(document.activeElement).toBe(button("展开论文笔记")),
