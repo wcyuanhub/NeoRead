@@ -291,9 +291,9 @@ function expectUncovered() {
     host.querySelector<HTMLElement>(".pdf-layout-body")?.style.visibility,
   ).toBe("hidden");
 }
-async function openTranslation(reason: string) {
+async function openTranslation(reason: string, kind = "段落") {
   expect(document.querySelector(".pdf-layout-expanded")).toBeNull();
-  await click(`${reason}，查看第 1 页段落译文`);
+  await click(`${reason}，查看第 1 页${kind}译文`);
   const popover = document.querySelector<HTMLElement>(".pdf-layout-expanded");
   expect(popover).not.toBeNull();
   expect(popover!.textContent).toContain(reason);
@@ -623,6 +623,28 @@ describe("visible page canvas rendering", () => {
     expect(pdfjs.getDocument).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["bounds", "原文区域超出页面"],
+    ["source", "原文区域与提取文本不一致"],
+    ["overlap", "与相邻内容重叠"],
+    ["background", "背景不适合覆盖"],
+    ["preserved", "此区域保留原版"],
+  ] as const)(
+    "explains a %s region with its own wording instead of a generic one",
+    async (reason, label) => {
+      vi.mocked(pageBlockLayouts).mockResolvedValue(
+        new Map([[block.id, layout({ mask: undefined, reason })]]),
+      );
+      await render();
+      await visible();
+      await fitFrame();
+      expectUncovered();
+      expect(
+        host.querySelector(".pdf-layout-expand")?.getAttribute("aria-label"),
+      ).toContain(label);
+    },
+  );
+
   it.each(["render", "layout"])(
     "reports %s errors and retries the page without reopening the PDF",
     async (stage) => {
@@ -850,7 +872,7 @@ describe("safe translation coverage and full-text fallback", () => {
     expect(host.querySelector(".pdf-layout-expand")?.textContent).toBe(
       "查看图注译文",
     );
-    const popup = await openTranslation("此区域保留原版");
+    const popup = await openTranslation("此区域保留原版", "图注");
     expect(popup.textContent).toContain("完整译文的最后一句。");
     expect(TranslationText).toHaveBeenLastCalledWith(
       expect.objectContaining({

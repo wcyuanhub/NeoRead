@@ -446,6 +446,15 @@ function PageSurface({
   );
 }
 
+/** Why a block keeps the original text; each case needs a different fix. */
+const maskReasons: Record<NonNullable<PageBlockLayout["reason"]>, string> = {
+  bounds: "原文区域超出页面",
+  source: "原文区域与提取文本不一致",
+  overlap: "与相邻内容重叠",
+  background: "背景不适合覆盖",
+  preserved: "此区域保留原版",
+};
+
 function LayoutBlock({
   block,
   layout,
@@ -546,9 +555,11 @@ function LayoutBlock({
     ? "尚未完成翻译"
     : !matches
       ? "译文与原文不匹配"
-      : preserved || !layout?.mask
-        ? "此区域保留原版"
-        : "译文超出原区域";
+      : preserved
+        ? maskReasons.preserved
+        : layout?.mask
+          ? "译文超出原区域"
+          : maskReasons[layout?.reason ?? "preserved"];
   return (
     <>
       {covered && (
@@ -602,7 +613,9 @@ function LayoutBlock({
                   variant="outline"
                   size="sm"
                   className="pdf-layout-expand"
-                  aria-label={`${reason}，查看第 ${block.page} 页段落译文`}
+                  aria-label={`${reason}，查看第 ${block.page} 页${
+                    caption ? "图注" : "段落"
+                  }译文`}
                 />
               }
             >
