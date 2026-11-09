@@ -106,6 +106,23 @@ it("loads the completed generated PDF, never the original plus overlays", async 
   expect(container.querySelector(".pdf-layout-expand")).toBeNull();
 });
 
+it("shows missing saved sentences separately from completed generation and coordinate fallback", async () => {
+  vi.mocked(api.pdfTypeset).mockResolvedValue({
+    status: "complete",
+    revision: "abc",
+    coverage: "partial",
+    savedSentences: 10,
+    writtenSentences: 8,
+    unwrittenSentences: 2,
+  });
+  await act(async () => root.render(<TypesetPDFPages {...props()} />));
+  expect(container.textContent).toContain("有 2 句已有译文未写入页面");
+  expect(container.textContent).not.toContain("当前显示原文");
+  expect(pdfjs.getDocument).toHaveBeenCalledWith(
+    expect.objectContaining({ url: "/pub/cap/doc/typeset/abc.pdf" }),
+  );
+});
+
 it("polls a running job and starts after translation becomes ready", async () => {
   vi.mocked(api.pdfTypeset)
     .mockResolvedValueOnce({ status: "waiting", revision: "old" })

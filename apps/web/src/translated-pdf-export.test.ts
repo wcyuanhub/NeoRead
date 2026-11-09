@@ -96,6 +96,21 @@ it("waits for the shared generation job and polls without restarting it", async 
   await task;
   expect(mocks.typeset.mock.calls.map((c) => c[1])).toEqual([true, false]);
 });
+
+it("returns the saved sentences missing from the downloaded PDF", async () => {
+  mocks.typeset.mockResolvedValue({
+    ...complete,
+    coverage: "partial",
+    unwrittenSentences: 3,
+  });
+  const result = await exportTranslatedPDF(
+    doc,
+    new AbortController().signal,
+    vi.fn(),
+  );
+  expect(result.unwrittenSentences).toBe(3);
+  expect(mocks.download).toHaveBeenCalledOnce();
+});
 it.each(["waiting", "unavailable", "failed"])(
   "does not silently use old overlay output when %s",
   async (status) => {

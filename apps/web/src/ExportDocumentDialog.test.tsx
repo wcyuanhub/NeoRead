@@ -106,6 +106,7 @@ it("exports translated PDF independently of Markdown selections and reports pres
   vi.mocked(exportTranslatedPDF).mockResolvedValue({
     pages: 3,
     translated: 8,
+    unwrittenSentences: 3,
     issues: [{ page: 2, blockId: "b", reason: "overflow" }],
   });
   await mount();
@@ -121,6 +122,7 @@ it("exports translated PDF independently of Markdown selections and reports pres
     }),
   );
   expect(document.body.textContent).toContain("写入 8 个译文段落");
+  expect(document.body.textContent).toContain("有 3 句已有译文未写入 PDF");
   expect(document.body.textContent).toContain(
     "第 2 页：译文无法在原区域内排下",
   );

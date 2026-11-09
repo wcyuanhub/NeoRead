@@ -5070,6 +5070,16 @@ export interface components {
             preserved?: number;
             translatedCharacters?: number;
             preservedCharacters?: number;
+            /** @enum {string} */
+            coverage?: "complete" | "partial";
+            savedSentences?: number;
+            writtenSentences?: number;
+            unwrittenSentences?: number;
+            unwrittenReasons?: {
+                source_alignment?: number;
+                formula_unresolved?: number;
+                preprocess_unavailable?: number;
+            };
         };
         PaperRefreshProgress: {
             /** @enum {string} */

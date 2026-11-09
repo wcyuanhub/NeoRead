@@ -415,6 +415,12 @@ export function ExportDocumentDialog({
                     部分公式、图表或未匹配段落保留原文，完整译文可在阅读器的段落译文浮层或连续文本中阅读。
                   </p>
                 )}
+                {!!pdfResult.unwrittenSentences && (
+                  <p>
+                    有 {pdfResult.unwrittenSentences} 句已有译文未写入
+                    PDF，相关位置保留原文。
+                  </p>
+                )}
                 {pdfResult.annotationsExported !== undefined && (
                   <p>
                     已写入 {pdfResult.annotationsExported} 条译文批注。

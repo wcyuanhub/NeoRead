@@ -3,6 +3,7 @@ package neoread
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"neoread.local/server/internal/diagnostics"
 )
 
 func fakeTypesetRuntime(t *testing.T, s *Server, output string) string {
@@ -34,6 +37,13 @@ func fakeTypesetRuntime(t *testing.T, s *Server, output string) string {
 		positions.Blocks = append(positions.Blocks, typesetPositionBlock{BlockID: b.ID, SourceHash: b.SourceHash, Page: b.Page, Targets: targets, Status: "fallback", Reason: "unverified_positions", Sentences: []typesetSentence{}})
 	}
 	positionData, _ := json.Marshal(positions)
+	if !strings.Contains(output, `"savedSentences"`) {
+		expected := 0
+		for _, block := range snapshot.Blocks {
+			expected += len(block.Sentences)
+		}
+		output = strings.ReplaceAll(output, `{"type":"finish",`, fmt.Sprintf(`{"type":"finish","savedSentences":%d,"writtenSentences":%d,"unwrittenSentences":0,`, expected, expected))
+	}
 	output = "printf '%s' '" + strings.ReplaceAll(string(positionData), "'", "'\\''") + "' > \"$(dirname \"$target\")/positions.json\"\n" + output
 	script := "while [ \"$#\" -gt 0 ]; do\nif [ \"$1\" = \"--output\" ]; then shift; target=\"$1\"; fi\nshift\ndone\n" + output
 	if err := os.WriteFile(filepath.Join(root, "worker.py"), []byte(script), 0600); err != nil {
@@ -118,7 +128,7 @@ printf '{"type":"finish","translated":1,"preserved":2}\n'
 		t.Fatal(status)
 	}
 	status := awaitTypeset(t, s)
-	if status.Status != "complete" || status.Translated != 1 {
+	if status.Status != "complete" || status.Translated != 1 || status.Coverage != "complete" || status.SavedSentences != 1 || status.WrittenSentences != 1 {
 		t.Fatal(status)
 	}
 	path := "/pub/test-secret/doc/typeset/" + status.Revision + ".pdf"
@@ -137,6 +147,87 @@ printf '{"type":"finish","translated":1,"preserved":2}\n'
 	after, _ := s.Store.processing("doc")
 	if jsonText(before) != jsonText(after) {
 		t.Fatal("generation changed translation processing")
+	}
+}
+
+func TestPDFTypesetPublishesPartialCoverageWithoutClaimingAllTranslationsWritten(t *testing.T) {
+	s, _, m := translationFixture(t)
+	saveExportTranslation(t, s, m.Blocks[0], "已有完整译文")
+	fakeTypesetRuntime(t, s, `printf '%%PDF-1.7\n' > "$target"
+printf '{"type":"finish","translated":1,"savedSentences":1,"writtenSentences":0,"unwrittenSentences":1,"unwrittenReasons":{"formula_unresolved":1}}\n'
+`)
+	typesetStatus(t, s, "POST")
+	status := awaitTypeset(t, s)
+	if status.Status != "complete" || status.Coverage != "partial" || status.UnwrittenSentences != 1 || status.UnwrittenReasons["formula_unresolved"] != 1 {
+		t.Fatal(status)
+	}
+	cached, ok := s.cachedTypeset("doc", status.Revision)
+	if !ok || cached.Coverage != "partial" || cached.UnwrittenSentences != 1 {
+		t.Fatal(cached, ok)
+	}
+	snapshot, _, err := s.typesetSnapshot("doc")
+	if err != nil || snapshot.Blocks[0].Sentences[0].Target != "已有完整译文" {
+		t.Fatal("saved translation changed", err)
+	}
+}
+
+func TestPDFTypesetRejectsInvalidCoverageProtocol(t *testing.T) {
+	for _, fields := range []string{
+		`"savedSentences":2,"writtenSentences":2,"unwrittenSentences":0`,
+		`"savedSentences":1,"writtenSentences":2,"unwrittenSentences":-1`,
+		`"savedSentences":1,"writtenSentences":0,"unwrittenSentences":0`,
+		`"savedSentences":1,"writtenSentences":0,"unwrittenSentences":1`,
+		`"savedSentences":1,"writtenSentences":0,"unwrittenSentences":1,"unwrittenReasons":{"document prose must not enter diagnostics":1}`,
+		`"savedSentences":1,"writtenSentences":0,"unwrittenSentences":1,"unwrittenReasons":{"formula_unresolved":-1}`,
+	} {
+		s, _, m := translationFixture(t)
+		saveExportTranslation(t, s, m.Blocks[0], "译文")
+		fakeTypesetRuntime(t, s, `printf '%%PDF-1.7\n' > "$target"`+"\n"+`printf '{"type":"finish","translated":1,`+fields+`}\n'`)
+		typesetStatus(t, s, "POST")
+		status := awaitTypeset(t, s)
+		if status.Status != "failed" || status.Reason != "invalid_coverage" {
+			t.Fatal(status)
+		}
+		if _, ok := s.cachedTypeset("doc", status.Revision); ok {
+			t.Fatal("invalid coverage published")
+		}
+	}
+}
+
+func TestPDFTypesetCoverageDiagnosticsExcludeDocumentAndUnknownReasons(t *testing.T) {
+	for _, reason := range []string{"formula_unresolved", "PRIVATE_UNKNOWN_REASON"} {
+		s, _, m := translationFixture(t)
+		saveExportTranslation(t, s, m.Blocks[0], "PRIVATE_TRANSLATION_BODY")
+		logs, err := diagnostics.New(t.TempDir(), "typeset-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.SetDiagnostics(logs)
+		fakeTypesetRuntime(t, s, `printf '%%PDF-1.7\n' > "$target"`+"\n"+`printf '{"type":"finish","translated":1,"savedSentences":1,"writtenSentences":0,"unwrittenSentences":1,"unwrittenReasons":{"`+reason+`":1}}\n'`)
+		snapshot, revision, _ := s.typesetSnapshot("doc")
+		s.typeset.jobs = map[string]pdfTypesetStatus{"doc": {Status: "running", Revision: revision}}
+		s.typeset.lane = make(chan struct{}, 1)
+		root, python, worker, _ := typesetRuntime()
+		s.runPDFTypeset(t.Context(), "doc", revision, snapshot, root, python, worker)
+		files, _ := filepath.Glob(filepath.Join(logs.Dir, "*.jsonl"))
+		var output strings.Builder
+		for _, file := range files {
+			data, _ := os.ReadFile(file)
+			output.Write(data)
+		}
+		text := output.String()
+		if strings.Contains(text, "PRIVATE_") {
+			t.Fatal("document or unknown reason entered diagnostics")
+		}
+		if reason == "formula_unresolved" {
+			for _, want := range []string{`"coverage":"partial"`, `"level":"warn"`, `"unwrittenSentences":1`, `"formulaUnresolvedSentences":1`} {
+				if !strings.Contains(text, want) {
+					t.Fatal("missing coverage diagnostic", want)
+				}
+			}
+		} else if !strings.Contains(text, `"reasonCode":"invalid_coverage"`) {
+			t.Fatal("missing controlled protocol failure")
+		}
 	}
 }
 

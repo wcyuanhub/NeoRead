@@ -14,6 +14,8 @@ import socket
 import sys
 import unicodedata
 
+from formulas import coverage_summary, math_signature, restore_formulas, restore_sentences
+
 
 VERSION = "0.6.4"
 
@@ -29,58 +31,6 @@ def plain_target(text):
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
     return re.sub(r"(\*\*|__|`)", "", text).strip()
-
-
-def restore_formulas(target, formulas):
-    """Retain vector math and unique footnote markers. Detached accent glyphs
-    are already represented by the saved Unicode translation (e.g. Barták).
-    Return None if preserving actual math would require guessing.
-    """
-    remaining = []
-    for placeholder, original in formulas:
-        if original and all(c in "´`ˊˋ¨ˆˇ˘˙˚˜˝" or unicodedata.combining(c) for c in original):
-            continue
-        if re.fullmatch(r"\d{1,3}[,.]?", original):
-            digits = original.rstrip(",.")
-            suffix = "[,，]" if original.endswith(",") else r"[.。]" if original.endswith(".") else ""
-            pattern = r"(?<![\w-])" + re.escape(digits) + suffix + r"(?!\d)"
-            occurrences = list(re.finditer(pattern, target))
-            if len(occurrences) == 1:
-                match = occurrences[0]
-                target = target[:match.start()] + placeholder + target[match.end():]
-                continue
-        # Upstream also classifies bibliography citations and footnote stars as
-        # formulas. Match these exact literals independently of actual math.
-        if re.fullmatch(r"\[\d+(?:\s*[,–-]\s*\d+)*\][,.]?|[∗*†‡]", original):
-            literal = original.rstrip(",.")
-            suffix = "[,，]?" if original.endswith(",") else "[.。]?" if original.endswith(".") else ""
-            occurrences = list(re.finditer(re.escape(literal) + suffix, target))
-            if len(occurrences) == 1:
-                match = occurrences[0]
-                target = target[:match.start()] + placeholder + target[match.end():]
-                continue
-        remaining.append((placeholder, original))
-    math = list(re.finditer(r"\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]", target))
-    if len(math) != len(remaining):
-        return None
-    # Equal counts alone are insufficient: a translation may reorder formulas.
-    # Require the extracted symbols to agree before reusing vector fragments.
-    for fragment, (_, original) in zip(math, remaining):
-        if math_signature(fragment.group()) != math_signature(original):
-            return None
-    for fragment, (placeholder, _) in reversed(list(zip(math, remaining))):
-        target = target[:fragment.start()] + placeholder + target[fragment.end():]
-    return target
-
-
-def math_signature(text):
-    text = unicodedata.normalize("NFKC", text)
-    for command, symbol in {"\\cdot": "·", "\\times": "×", "\\leq": "≤", "\\geq": "≥",
-                            "\\alpha": "α", "\\beta": "β", "\\theta": "θ", "\\sigma": "σ"}.items():
-        text = text.replace(command, symbol)
-    text = re.sub(r"\\(?:mathrm|mathbf|mathit|text|left|right)\b", "", text)
-    text = text.replace("−", "-")
-    return re.sub(r"[\s${}_^]|\\[()[\]]", "", text)
 
 
 class SavedTranslations:
@@ -175,6 +125,8 @@ def main():
     counts = {"translated": 0, "preserved": 0, "translatedCharacters": 0, "preservedCharacters": 0}
     records = []
     used = set()
+    written, rejected = set(), {}
+    blocks = {b["id"]: b for b in snapshot["blocks"]}
     adapter_failed = [False]
     layouts = {}
     layout_counts = {"sourceAnchored": 0, "centered": 0}
@@ -207,13 +159,19 @@ def main():
                 text, translate_input = self.pre_translate_paragraph(paragraph, tracker, page_font_map, xobj_font_map)
                 if not text or not translate_input:
                     counts["preserved"] += 1
+                    counts["preservedCharacters"] += len(original)
+                    rejected.update((key, "preprocess_unavailable") for key in covered)
                     return
-                target = plain_target(matched[0])
-                # Replace math in the saved Markdown by the original vector formula.
+                sentences = blocks[matched[1][0]]["sentences"][matched[1][1]:matched[1][2]+1]
                 formulas = [p for p in translate_input.placeholders if isinstance(p, il_translator.FormulaPlaceholder)]
-                target = restore_formulas(target, [(p.placeholder, get_char_unicode_string(p.formula.pdf_character)) for p in formulas])
-                if target is None:
-                    # No guessing or reordering formulas: keep the original paragraph.
+                target, completed = restore_sentences(
+                    [plain_target(s["target"]) for s in sentences],
+                    [s.get("anchor") or s["source"] for s in sentences],
+                    [(p.placeholder, get_char_unicode_string(p.formula.pdf_character)) for p in formulas],
+                    translate_input.unicode)
+                rejected.update(((matched[1][0], matched[1][1]+i), "formula_unresolved")
+                                for i in range(len(sentences)) if i not in completed)
+                if target is None or not completed:
                     counts["preserved"] += 1
                     counts["preservedCharacters"] += len(original)
                     return
@@ -222,6 +180,7 @@ def main():
                 layouts[id(paragraph)] = source_layout
                 records.append((paragraph, page.page_number + 1, matched[1]))
                 used.update(covered)
+                written.update((matched[1][0], matched[1][1]+i) for i in completed)
                 counts["translated"] += 1
                 counts["translatedCharacters"] += len(original)
             except Exception:
@@ -275,7 +234,8 @@ def main():
     positions = build_positions(snapshot, records, result.mono_pdf_path, lambda text: math_signature(plain_target(text)))
     Path(args.output).with_name("positions.json").write_text(json.dumps(positions, ensure_ascii=True))
     shutil.copyfile(result.mono_pdf_path, args.output)
-    emit(type="finish", **counts, **layout_counts)
+    emit(type="finish", **counts, **layout_counts,
+         **coverage_summary(snapshot["blocks"], written, rejected))
 
 
 if __name__ == "__main__":

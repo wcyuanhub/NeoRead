@@ -19,19 +19,46 @@ import (
 	"time"
 )
 
-const typesetVersion = "babeldoc-0.6.4-neoread-3"
+const typesetVersion = "babeldoc-0.6.4-neoread-4"
 
 type pdfTypesetStatus struct {
-	Pages                int    `json:"pages,omitempty"`
-	Phase                string `json:"phase,omitempty"`
-	Status               string `json:"status"`
-	Revision             string `json:"revision"`
-	Reason               string `json:"reason,omitempty"`
-	Translated           int    `json:"translated,omitempty"`
-	Preserved            int    `json:"preserved,omitempty"`
-	TranslatedCharacters int    `json:"translatedCharacters,omitempty"`
-	PreservedCharacters  int    `json:"preservedCharacters,omitempty"`
+	Pages                int            `json:"pages,omitempty"`
+	Phase                string         `json:"phase,omitempty"`
+	Status               string         `json:"status"`
+	Revision             string         `json:"revision"`
+	Reason               string         `json:"reason,omitempty"`
+	Translated           int            `json:"translated,omitempty"`
+	Preserved            int            `json:"preserved,omitempty"`
+	TranslatedCharacters int            `json:"translatedCharacters,omitempty"`
+	PreservedCharacters  int            `json:"preservedCharacters,omitempty"`
+	Coverage             string         `json:"coverage,omitempty"`
+	SavedSentences       int            `json:"savedSentences,omitempty"`
+	WrittenSentences     int            `json:"writtenSentences,omitempty"`
+	UnwrittenSentences   int            `json:"unwrittenSentences,omitempty"`
+	UnwrittenReasons     map[string]int `json:"unwrittenReasons,omitempty"`
 }
+
+// Saved-translation coverage is independent of parser paragraph counts and
+// verified interaction coordinates. Never log arbitrary worker reason strings.
+func validTypesetCoverage(saved, written, unwritten int, reasons map[string]int, expected int) bool {
+	if saved != expected || saved <= 0 || written < 0 || written > saved || unwritten != saved-written {
+		return false
+	}
+	total := 0
+	for reason, count := range reasons {
+		switch reason {
+		case "source_alignment", "formula_unresolved", "preprocess_unavailable":
+		default:
+			return false
+		}
+		if count <= 0 || count > unwritten-total {
+			return false
+		}
+		total += count
+	}
+	return total == unwritten
+}
+
 type pdfTypesetBlock struct {
 	PDFBlock
 	Sentences  []TranslationSentence `json:"sentences"`
@@ -116,6 +143,13 @@ func (s *Server) cachedTypeset(documentID, revision string) (pdfTypesetStatus, b
 	if err != nil || fileErr != nil || !stat.Mode().IsRegular() || stat.Size() < 5 || !typesetPositionsExist(root) || json.Unmarshal(data, &status) != nil || status.Status != "complete" || status.Revision != revision {
 		return status, false
 	}
+	coverage := "complete"
+	if status.UnwrittenSentences > 0 {
+		coverage = "partial"
+	}
+	if status.Coverage != coverage || !validTypesetCoverage(status.SavedSentences, status.WrittenSentences, status.UnwrittenSentences, status.UnwrittenReasons, status.SavedSentences) {
+		return status, false
+	}
 	return status, true
 }
 
@@ -177,6 +211,10 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 	started, runID := time.Now(), id()
 	status := pdfTypesetStatus{Status: "failed", Revision: revision, Reason: "engine_failed", Pages: snapshot.Manifest.Pages}
 	sourceAnchored, centered := 0, 0
+	expectedSentences := 0
+	for _, block := range snapshot.Blocks {
+		expectedSentences += len(block.Sentences)
+	}
 	s.diagnosticEvent(slog.LevelInfo, "pdf.typeset.start", "runId", runID, "documentId", documentID, "version", typesetVersion)
 	defer func() {
 		if ctx.Err() != nil {
@@ -191,10 +229,12 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 		}
 		s.typeset.mu.Unlock()
 		level := slog.LevelInfo
-		if status.Status != "complete" && ctx.Err() == nil {
+		if status.Status == "complete" && status.Coverage == "partial" {
+			level = slog.LevelWarn
+		} else if status.Status != "complete" && ctx.Err() == nil {
 			level = slog.LevelError
 		}
-		s.diagnosticEvent(level, "pdf.typeset.finish", "runId", runID, "documentId", documentID, "outcome", status.Status, "reasonCode", status.Reason, "durationMs", time.Since(started).Milliseconds(), "translatedBlocks", status.Translated, "preservedBlocks", status.Preserved, "sourceAnchoredBlocks", sourceAnchored, "centeredBlocks", centered)
+		s.diagnosticEvent(level, "pdf.typeset.finish", "runId", runID, "documentId", documentID, "outcome", status.Status, "reasonCode", status.Reason, "durationMs", time.Since(started).Milliseconds(), "translatedBlocks", status.Translated, "preservedBlocks", status.Preserved, "sourceAnchoredBlocks", sourceAnchored, "centeredBlocks", centered, "coverage", status.Coverage, "savedSentences", status.SavedSentences, "writtenSentences", status.WrittenSentences, "unwrittenSentences", status.UnwrittenSentences, "sourceAlignmentSentences", status.UnwrittenReasons["source_alignment"], "formulaUnresolvedSentences", status.UnwrittenReasons["formula_unresolved"], "preprocessUnavailableSentences", status.UnwrittenReasons["preprocess_unavailable"])
 	}()
 	select {
 	case s.typeset.lane <- struct{}{}:
@@ -257,15 +297,19 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 	lastPhase := ""
 	for scanner.Scan() {
 		var event struct {
-			Phase                string `json:"phase"`
-			Type                 string `json:"type"`
-			Reason               string `json:"reason"`
-			Translated           int    `json:"translated"`
-			Preserved            int    `json:"preserved"`
-			TranslatedCharacters int    `json:"translatedCharacters"`
-			PreservedCharacters  int    `json:"preservedCharacters"`
-			SourceAnchored       int    `json:"sourceAnchored"`
-			Centered             int    `json:"centered"`
+			Phase                string         `json:"phase"`
+			Type                 string         `json:"type"`
+			Reason               string         `json:"reason"`
+			Translated           int            `json:"translated"`
+			Preserved            int            `json:"preserved"`
+			TranslatedCharacters int            `json:"translatedCharacters"`
+			PreservedCharacters  int            `json:"preservedCharacters"`
+			SourceAnchored       int            `json:"sourceAnchored"`
+			Centered             int            `json:"centered"`
+			SavedSentences       *int           `json:"savedSentences"`
+			WrittenSentences     *int           `json:"writtenSentences"`
+			UnwrittenSentences   *int           `json:"unwrittenSentences"`
+			UnwrittenReasons     map[string]int `json:"unwrittenReasons"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &event) != nil {
 			continue
@@ -284,7 +328,18 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 			}
 		}
 		if event.Type == "finish" && event.Translated > 0 {
+			if finished || event.SavedSentences == nil || event.WrittenSentences == nil || event.UnwrittenSentences == nil ||
+				!validTypesetCoverage(*event.SavedSentences, *event.WrittenSentences, *event.UnwrittenSentences, event.UnwrittenReasons, expectedSentences) {
+				status.Reason = "invalid_coverage"
+				continue
+			}
 			finished = true
+			status.SavedSentences, status.WrittenSentences, status.UnwrittenSentences = *event.SavedSentences, *event.WrittenSentences, *event.UnwrittenSentences
+			status.UnwrittenReasons = event.UnwrittenReasons
+			status.Coverage = "complete"
+			if status.UnwrittenSentences > 0 {
+				status.Coverage = "partial"
+			}
 			status.Translated, status.Preserved = event.Translated, event.Preserved
 			status.TranslatedCharacters, status.PreservedCharacters = event.TranslatedCharacters, event.PreservedCharacters
 			if event.SourceAnchored >= 0 && event.SourceAnchored <= event.Translated && event.Centered >= 0 && event.Centered <= event.SourceAnchored {
@@ -298,7 +353,7 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 			}
 		}
 	}
-	if err = cmd.Wait(); err != nil || scanner.Err() != nil || !finished || ctx.Err() != nil {
+	if err = cmd.Wait(); err != nil || scanner.Err() != nil || !finished || ctx.Err() != nil || status.Reason == "invalid_coverage" {
 		return
 	}
 	// A retranslation or reparse during generation must never publish stale output.

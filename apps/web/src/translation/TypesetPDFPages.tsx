@@ -383,6 +383,12 @@ export function TypesetPDFPages({
   return (
     <div className="pdf-layout-pages pdf-typeset-pages">
       {!loaded.generated && statusMessage}
+      {loaded.generated && status?.coverage === "partial" && (
+        <div className="pdf-typeset-status" role="status">
+          有 {status.unwrittenSentences}{" "}
+          句已有译文未写入页面，相关位置仍保留原文。可通过段落旁的「译文」查看完整内容。
+        </div>
+      )}
       {loaded.sizes.map((size, index) => {
         const pageBlocks = blocks.filter((b) => b.page === index + 1);
         const mapped = pageBlocks.flatMap((block) => {

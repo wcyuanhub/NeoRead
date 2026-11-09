@@ -90,6 +90,8 @@ export async function exportTranslatedPDF(
       preserved: status.preserved ?? 0,
       issues: [],
     };
+    if (status.unwrittenSentences !== undefined)
+      result.unwrittenSentences = status.unwrittenSentences;
     const marks =
       options?.annotations.filter(
         (a) =>

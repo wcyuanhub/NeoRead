@@ -5826,6 +5826,25 @@
                   "preserved": { "type": "integer", "minimum": 0 },
                   "translatedCharacters": { "type": "integer", "minimum": 0 },
                   "preservedCharacters": { "type": "integer", "minimum": 0 },
+                  "coverage":
+                    { "type": "string", "enum": ["complete", "partial"] },
+                  "savedSentences": { "type": "integer", "minimum": 0 },
+                  "writtenSentences": { "type": "integer", "minimum": 0 },
+                  "unwrittenSentences": { "type": "integer", "minimum": 0 },
+                  "unwrittenReasons":
+                    {
+                      "type": "object",
+                      "properties":
+                        {
+                          "source_alignment":
+                            { "type": "integer", "minimum": 0 },
+                          "formula_unresolved":
+                            { "type": "integer", "minimum": 0 },
+                          "preprocess_unavailable":
+                            { "type": "integer", "minimum": 0 },
+                        },
+                      "additionalProperties": false,
+                    },
                 },
             },
           "PaperRefreshProgress":
