@@ -4,7 +4,7 @@ import {
   exportFailureDetail,
   PDFExportError,
 } from "./translation/pdf-export-error";
-import type { Document } from "@neoread/core";
+import type { Annotation, Document, Message } from "@neoread/core";
 import { api, publicationURL } from "@neoread/api";
 import { downloadBlob, fileTitle } from "./download";
 import { reportDiagnostic } from "./diagnostics";
@@ -12,11 +12,19 @@ import type {
   PDFExportProgress,
   TranslatedPDF,
 } from "./translation/pdf-export-model";
+import workerURL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+type AnnotationOptions = {
+  annotations: Annotation[];
+  messages: Message[];
+  kinds: Annotation["kind"][];
+};
 
 export async function exportTranslatedPDF(
   doc: Document,
   signal: AbortSignal,
   onProgress: (progress: PDFExportProgress) => void,
+  options?: AnnotationOptions,
 ): Promise<Omit<TranslatedPDF, "bytes">> {
   const started = performance.now();
   const requestId = crypto.randomUUID();
@@ -64,7 +72,7 @@ export async function exportTranslatedPDF(
     }
     phase = "saving";
     onProgress({ phase: "saving", done: 0, total: 0 });
-    const blob = await exportOperation("save", async () => {
+    let blob = await exportOperation("save", async () => {
       const response = await fetch(
         publicationURL(doc.id, `typeset/${status.revision}.pdf`),
         { signal },
@@ -76,12 +84,68 @@ export async function exportTranslatedPDF(
         throw new Error("译文 PDF 文件无效，请重试。");
       return value;
     });
-    const result = {
+    const result: Omit<TranslatedPDF, "bytes"> = {
       pages: status.pages ?? 0,
       translated: status.translated ?? 0,
       preserved: status.preserved ?? 0,
       issues: [],
     };
+    const marks =
+      options?.annotations.filter(
+        (a) =>
+          a.location.translation &&
+          a.kind !== "bookmark" &&
+          options.kinds.includes(a.kind),
+      ) ?? [];
+    if (marks.length) {
+      const revision = status.revision!;
+      const [positions, blocks, translations] = await exportOperation(
+        "snapshot",
+        () =>
+          Promise.all([
+            api.pdfTypesetPositions(doc.id, revision, signal),
+            api.blocks(doc.id, signal),
+            api.translations(doc.id, signal),
+          ]),
+      );
+      signal.throwIfAborted();
+      if (positions.version !== 1 || positions.revision !== revision)
+        throw new PDFExportError(
+          "snapshot",
+          new Error("译文位置已变化，请重新导出。"),
+        );
+      const { typesetAnnotationRects } =
+        await import("./translation/typeset-annotation-rects");
+      const { annotatedPDF } = await import("./readers/pdf-export");
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc ||= workerURL;
+      const source = {
+        data: new Uint8Array(await blob.arrayBuffer()),
+        cMapUrl: "/pdf-assets/cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "/pdf-assets/standard_fonts/",
+        wasmUrl: "/pdf-assets/wasm/",
+      };
+      const annotated = await exportOperation("save", () =>
+        annotatedPDF(pdfjs.getDocument, source, marks, {
+          translatedRects: typesetAnnotationRects(
+            positions,
+            blocks,
+            translations,
+            marks,
+          ),
+          answers: Object.fromEntries(
+            (options?.messages ?? []).map((m) => [m.id, m.content]),
+          ),
+        }),
+      );
+      signal.throwIfAborted();
+      blob = new Blob([annotated.bytes as Uint8Array<ArrayBuffer>], {
+        type: "application/pdf",
+      });
+      result.annotationsExported = annotated.exported;
+      result.annotationsSkipped = annotated.skipped;
+    }
     signal.throwIfAborted();
     phase = "download";
     downloadBlob(blob, `${fileTitle(doc.title)}-译文.pdf`);

@@ -114,6 +114,11 @@ it("exports translated PDF independently of Markdown selections and reports pres
     doc,
     expect.any(AbortSignal),
     expect.any(Function),
+    expect.objectContaining({
+      annotations: expect.any(Array),
+      messages: expect.any(Array),
+      kinds: ["note"],
+    }),
   );
   expect(document.body.textContent).toContain("写入 8 个译文段落");
   expect(document.body.textContent).toContain(

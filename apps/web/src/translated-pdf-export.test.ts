@@ -1,13 +1,31 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Document } from "@neoread/core";
+import type { Annotation, Document } from "@neoread/core";
 const mocks = vi.hoisted(() => ({
   typeset: vi.fn(),
   log: vi.fn(),
   download: vi.fn(),
+  positions: vi.fn(),
+  blocks: vi.fn(),
+  translations: vi.fn(),
+  rects: vi.fn(),
+  annotated: vi.fn(),
 }));
 vi.mock("@neoread/api", () => ({
-  api: { pdfTypeset: mocks.typeset },
+  api: {
+    pdfTypeset: mocks.typeset,
+    pdfTypesetPositions: mocks.positions,
+    blocks: mocks.blocks,
+    translations: mocks.translations,
+  },
   publicationURL: (id: string, path: string) => `/pub/${id}/${path}`,
+}));
+vi.mock("./translation/typeset-annotation-rects", () => ({
+  typesetAnnotationRects: mocks.rects,
+}));
+vi.mock("./readers/pdf-export", () => ({ annotatedPDF: mocks.annotated }));
+vi.mock("pdfjs-dist", () => ({
+  GlobalWorkerOptions: {},
+  getDocument: vi.fn(),
 }));
 vi.mock("./diagnostics", () => ({ reportDiagnostic: mocks.log }));
 vi.mock("./download", () => ({
@@ -34,12 +52,10 @@ beforeEach(() => {
   mocks.typeset.mockResolvedValue(complete);
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        blob: async () => new Blob(["%PDF-1.7\n"]),
-      }),
+    vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["%PDF-1.7\n"]),
+    }),
   );
 });
 afterEach(() => {
@@ -141,4 +157,77 @@ it("cancels polling without a download or failure diagnostic", async () => {
       event: "pdf.translation_export.cancelled",
     }),
   );
+});
+
+it("includes selected translated marks and reports unplaceable marks without using source annotations", async () => {
+  const marks = [
+    {
+      id: "t",
+      kind: "note",
+      location: { type: "pdf", page: 1, translation: { blockId: "b" } },
+    },
+    { id: "s", kind: "note", location: { type: "pdf", page: 1, rects: [] } },
+    {
+      id: "h",
+      kind: "highlight",
+      location: { type: "pdf", page: 1, translation: { blockId: "b" } },
+    },
+  ] as Annotation[];
+  const placements = new Map();
+  mocks.positions.mockResolvedValue({
+    version: 1,
+    revision: "revision",
+    blocks: [],
+  });
+  mocks.blocks.mockResolvedValue([]);
+  mocks.translations.mockResolvedValue([]);
+  mocks.rects.mockReturnValue(placements);
+  mocks.annotated.mockResolvedValue({
+    bytes: new TextEncoder().encode("%PDF-marked"),
+    exported: 0,
+    skipped: 1,
+  });
+  const signal = new AbortController().signal;
+  const result = await exportTranslatedPDF(doc, signal, vi.fn(), {
+    annotations: marks,
+    messages: [],
+    kinds: ["note"],
+  });
+  expect(mocks.positions).toHaveBeenCalledWith(doc.id, "revision", signal);
+  expect(mocks.annotated).toHaveBeenCalledWith(
+    expect.any(Function),
+    expect.objectContaining({ data: expect.any(Uint8Array) }),
+    [marks[0]],
+    { answers: {}, translatedRects: placements },
+  );
+  expect(result).toMatchObject({
+    annotationsExported: 0,
+    annotationsSkipped: 1,
+  });
+  expect(mocks.download).toHaveBeenCalledTimes(1);
+});
+
+it("rejects a mismatched positions revision before writing annotations", async () => {
+  mocks.positions.mockResolvedValue({
+    version: 1,
+    revision: "stale",
+    blocks: [],
+  });
+  mocks.blocks.mockResolvedValue([]);
+  mocks.translations.mockResolvedValue([]);
+  await expect(
+    exportTranslatedPDF(doc, new AbortController().signal, vi.fn(), {
+      annotations: [
+        {
+          id: "t",
+          kind: "note",
+          location: { type: "pdf", page: 1, translation: { blockId: "b" } },
+        } as Annotation,
+      ],
+      messages: [],
+      kinds: ["note"],
+    }),
+  ).rejects.toThrow("位置已变化");
+  expect(mocks.annotated).not.toHaveBeenCalled();
+  expect(mocks.download).not.toHaveBeenCalled();
 });

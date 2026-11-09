@@ -234,13 +234,15 @@ export interface ExportContext {
   /** Chat message text by ID, for answered questions. */
   answers?: Record<string, string>;
   navigation?: (pdf: PDFDocumentProxy) => Promise<TOCItem[]>;
+  /** Verified positions in the generated translated PDF only. */
+  translatedRects?: ReadonlyMap<string, { page: number; rects: Rect[] }[]>;
 }
 
 export async function annotatedPDF(
   getDocument: (params: DocumentInitParameters) => PDFDocumentLoadingTask,
   source: DocumentInitParameters,
   annotations: Annotation[],
-  { answers = {}, navigation }: ExportContext = {},
+  { answers = {}, navigation, translatedRects }: ExportContext = {},
 ): Promise<AnnotatedPDF> {
   const task = getDocument(source);
   try {
@@ -257,10 +259,21 @@ export async function annotatedPDF(
       const pages = new Map<number, Quad[]>();
       // A translated mark has no exact range in the original PDF.
       if (location.translation) {
-        skipped++;
-        continue;
-      }
-      if (location.sourceAnchors?.length) {
+        const placements = translatedRects?.get(annotation.id);
+        if (placements?.length) {
+          for (const placement of placements) {
+            if (!inRange(placement.page) || !placement.rects.length) {
+              pages.clear();
+              break;
+            }
+            const page = await pdf.getPage(placement.page);
+            pages.set(placement.page, [
+              ...(pages.get(placement.page) ?? []),
+              ...displayQuads(page, placement.rects),
+            ]);
+          }
+        }
+      } else if (location.sourceAnchors?.length) {
         for (const anchor of location.sourceAnchors) {
           if (!inRange(anchor.page)) {
             pages.clear();

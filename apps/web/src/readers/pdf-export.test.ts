@@ -136,6 +136,39 @@ describe("annotated PDF export", () => {
     expect(pages.flat()).toEqual([]);
   }, 30_000);
 
+  it("writes translated annotations only at explicitly verified translated positions", async () => {
+    const annotation = mark({
+      id: "translated",
+      note: "译文批注",
+      quote: "译文",
+      location: {
+        type: "pdf",
+        page: 1,
+        rects: [{ x: 0.8, y: 0.8, width: 0.1, height: 0.1 }],
+        translation: {
+          blockId: "b",
+          sourceHash: "h",
+          sentenceIndexes: [0],
+          start: 0,
+          end: 2,
+        },
+      },
+    });
+    const { result, pages } = await exportAndReopen([annotation], {
+      translatedRects: new Map([
+        [
+          annotation.id,
+          [{ page: 2, rects: [{ x: 0.1, y: 0.2, width: 0.2, height: 0.03 }] }],
+        ],
+      ]),
+    });
+    expect(result).toMatchObject({ exported: 1, skipped: 0 });
+    expect(pages[0]).toHaveLength(0);
+    const written = pages[1].find((a) => a.subtype === "Highlight")!;
+    expect(written.contentsObj.str).toBe("译文批注");
+    expect(written.rect[0]).toBeLessThan(100);
+  }, 30_000);
+
   const page = { x: 0, y: 0, width: 1, height: 1 };
   const spanning = (second: string): Annotation =>
     mark({

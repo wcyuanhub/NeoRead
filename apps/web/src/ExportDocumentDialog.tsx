@@ -240,6 +240,7 @@ export function ExportDocumentDialog({
         (progress) => {
           if (!controller.signal.aborted) setPDFProgress(progress);
         },
+        { annotations, messages, kinds },
       );
       if (!controller.signal.aborted) setPDFResult(result);
     } catch (error) {
@@ -371,7 +372,7 @@ export function ExportDocumentDialog({
           <div className="space-y-3 border-t pt-4">
             <div className="flex items-center gap-3">
               <p className="flex-1 text-xs leading-5 text-muted-foreground">
-                按原版面导出已保存的译文。图表、公式和无法排入的段落保留原文。
+                按原版面导出已保存译文及勾选的译文批注。图表、公式和无法排入的段落保留原文。
               </p>
               <Button
                 variant="outline"
@@ -411,7 +412,14 @@ export function ExportDocumentDialog({
                 </p>
                 {!!pdfResult.preserved && (
                   <p>
-                    部分公式、图表或未匹配段落保留原文，完整译文可在连续文本中阅读。
+                    部分公式、图表或未匹配段落保留原文，完整译文可在阅读器同页下方或连续文本中阅读。
+                  </p>
+                )}
+                {pdfResult.annotationsExported !== undefined && (
+                  <p>
+                    已写入 {pdfResult.annotationsExported} 条译文批注。
+                    {!!pdfResult.annotationsSkipped &&
+                      `另有 ${pdfResult.annotationsSkipped} 条无法精确定位，未写入。`}
                   </p>
                 )}
                 {pdfResult.issues.length > 0 && (
