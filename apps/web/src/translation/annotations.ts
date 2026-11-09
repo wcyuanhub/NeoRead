@@ -62,7 +62,13 @@ export function translatedAnnotationRanges(
         continue;
       }
       const range = textRange(node, part.start, part.end);
-      if (range?.toString().trim() === part.quote.trim())
+      const window = sentenceWindow(node, part.sentenceIndexes);
+      const inWindow =
+        !window ||
+        (range &&
+          range.compareBoundaryPoints(Range.START_TO_START, window) >= 0 &&
+          range.compareBoundaryPoints(Range.END_TO_END, window) <= 0);
+      if (inWindow && range?.toString().trim() === part.quote.trim())
         result.push({ annotation, range });
       else {
         // The same saved translation has different Markdown/line geometry in
@@ -118,11 +124,9 @@ export function paintTranslatedAnnotations(
 
 // Recovery has already selected and persisted the sentence window on the
 // server. Drawing only resolves that window in the current formatted DOM.
-function recoveredAnnotationRange(
+function sentenceWindow(
   root: HTMLElement,
   indexes: number[],
-  quote: string,
-  strict = false,
 ): Range | undefined {
   const sentences = indexes.map((i) =>
     root.querySelector<HTMLElement>(`[data-sentence="${i}"]`),
@@ -132,6 +136,17 @@ function recoveredAnnotationRange(
   range.setStart(sentences[0]!, 0);
   const last = sentences.at(-1)!;
   range.setEnd(last, last.childNodes.length);
+  return range;
+}
+
+function recoveredAnnotationRange(
+  root: HTMLElement,
+  indexes: number[],
+  quote: string,
+  strict = false,
+): Range | undefined {
+  const range = sentenceWindow(root, indexes);
+  if (!range) return;
   const before = document.createRange();
   before.selectNodeContents(root);
   before.setEnd(range.startContainer, range.startOffset);

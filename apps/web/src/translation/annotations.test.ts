@@ -3,6 +3,43 @@ import { expect, it } from "vitest";
 import type { Annotation, TranslationBlock } from "@neoread/core";
 import { textRange, translatedAnnotationRanges } from "./annotations";
 
+it("does not attach an exact repeated quote outside its recorded sentence window", () => {
+  const host = document.createElement("div");
+  host.innerHTML =
+    '<section data-translation-block="b"><span data-sentence="0">重复。</span><span data-sentence="1">重复。</span></section>';
+  const annotation = {
+    id: "a",
+    quote: "重复。",
+    location: {
+      type: "pdf",
+      page: 1,
+      translation: {
+        blockId: "b",
+        sourceHash: "h",
+        sentenceIndexes: [1],
+        start: 0,
+        end: 3,
+      },
+    },
+  } as Annotation;
+  const translations: TranslationBlock[] = [
+    {
+      blockId: "b",
+      sourceHash: "h",
+      status: "complete",
+      sentences: [
+        { source: "a", target: "重复。" },
+        { source: "b", target: "重复。" },
+      ],
+    },
+  ];
+  const ranges = translatedAnnotationRanges(host, [annotation], translations);
+  expect(ranges).toHaveLength(1);
+  expect(ranges[0].range.startContainer.parentElement?.dataset.sentence).toBe(
+    "1",
+  );
+});
+
 it("restores a translated mark across formatted text nodes without changing text", () => {
   const host = document.createElement("div");
   host.innerHTML =
