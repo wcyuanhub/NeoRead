@@ -63,7 +63,7 @@ await writeFile(
     'import os\nCACHE_FOLDER = Path(os.environ.get("NEOREAD_BABELDOC_WORK", "."))',
   ),
 );
-for (const file of ["worker.py", "positions.py"])
+for (const file of ["worker.py", "positions.py", "layout.py"])
   await cp(join(root, "scripts/babeldoc", file), join(runtime, file));
 // Keep the adapter source, reproducible dependency list and modification notice
 // alongside upstream Python sources/licenses in the distributable runtime.

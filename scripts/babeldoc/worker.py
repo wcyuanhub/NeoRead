@@ -164,6 +164,7 @@ def main():
     from babeldoc.format.pdf.document_il.midend import il_translator
     from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
     from babeldoc.translator.translator import BaseTranslator
+    from layout import capture_layout, source_typesetter
 
     def offline(*_args, **_kwargs):
         raise RuntimeError("offline_resource_missing")
@@ -175,6 +176,8 @@ def main():
     records = []
     used = set()
     adapter_failed = [False]
+    layouts = {}
+    layout_counts = {"sourceAnchored": 0, "centered": 0}
 
     class OfflineTranslator(BaseTranslator):
         name = "neoread-saved"
@@ -200,6 +203,7 @@ def main():
                     counts["preserved"] += 1
                     counts["preservedCharacters"] += len(original)
                     return
+                source_layout = capture_layout(paragraph, page)
                 text, translate_input = self.pre_translate_paragraph(paragraph, tracker, page_font_map, xobj_font_map)
                 if not text or not translate_input:
                     counts["preserved"] += 1
@@ -215,6 +219,7 @@ def main():
                     return
                 translate_input.placeholders = [p for p in translate_input.placeholders if not isinstance(p, il_translator.FormulaPlaceholder) or p.placeholder in target]
                 self.post_translate_paragraph(paragraph, tracker, translate_input, target)
+                layouts[id(paragraph)] = source_layout
                 records.append((paragraph, page.page_number + 1, matched[1]))
                 used.update(covered)
                 counts["translated"] += 1
@@ -230,6 +235,7 @@ def main():
     # Pinned compatibility seam: high_level imports this class by value.
     import babeldoc.format.pdf.high_level as high_level
     high_level.ILTranslator = SavedILTranslator
+    high_level.Typesetting = source_typesetter(high_level.Typesetting, layouts, layout_counts)
     work = Path(args.output).parent
     emit(type="stage", phase="parsing")
     config = TranslationConfig(
@@ -269,13 +275,13 @@ def main():
     positions = build_positions(snapshot, records, result.mono_pdf_path, lambda text: math_signature(plain_target(text)))
     Path(args.output).with_name("positions.json").write_text(json.dumps(positions, ensure_ascii=True))
     shutil.copyfile(result.mono_pdf_path, args.output)
-    emit(type="finish", **counts)
+    emit(type="finish", **counts, **layout_counts)
 
 
 if __name__ == "__main__":
     try:
         main()
     except BaseException as exc:
-        code = str(exc) if str(exc) in {"runtime_version", "offline_resource_missing", "no_mapped_translation", "page_mismatch"} else "engine_failed"
+        code = str(exc) if str(exc) in {"runtime_version", "offline_resource_missing", "no_mapped_translation", "page_mismatch", "layout_overflow"} else "engine_failed"
         emit(type="error", reason=code)
         sys.exit(1)

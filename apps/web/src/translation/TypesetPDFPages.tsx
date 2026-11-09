@@ -43,6 +43,8 @@ const explanations: Record<string, string> = {
     "PDF 排版组件未就绪，当前显示原文。可点击段落旁的「译文」查看已有译文。",
   translation_pending: "正在等待译文，当前显示原文。",
   offline_resource_missing: "排版资源不完整，请重新准备排版组件。",
+  layout_overflow:
+    "部分译文无法在原栏位内清晰排入，暂时显示原文。可通过段落旁的译文按钮阅读。",
   no_mapped_translation:
     "暂时无法生成译文页面，当前显示原文。可点击段落旁的「译文」查看已有译文。",
   snapshot_changed: "译文已更新，请重新生成排版。",

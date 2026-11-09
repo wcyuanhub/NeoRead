@@ -151,7 +151,7 @@ API 厂商规则、实际强度映射、上游错误分类和请求关联字段�
 
 ## PDF 显示渲染
 
-保留排版生成使用 `pdf.typeset.start / stage / finish`，通过 `runId`、`documentId` 关联。阶段限于读取、布局、段落、公式、译文对应、排版与保存；终态记录受控原因、耗时、译文与保留段落数。子进程只传递固定阶段和统计，不记录正文、原始异常或 stderr。PDF.js 加载和局部渲染失败分别记录 `pdf.typeset.load_failed / render_failed`。缓存及限制见 [PDF 保留排版译文](pdf-typesetting.md)。
+保留排版生成使用 `pdf.typeset.start / stage / finish`，通过 `runId`、`documentId` 关联。阶段限于读取、布局、段落、公式、译文对应、排版与保存；终态记录受控原因、耗时、译文与保留段落数，以及保留原框排版、居中对齐的段落数。`layout_overflow` 表示译文在允许的行距及字号范围内仍无法放入原区域，新文件不发布。子进程只传递固定阶段和统计，不记录正文、原始异常或 stderr。PDF.js 加载和局部渲染失败分别记录 `pdf.typeset.load_failed / render_failed`。缓存及限制见 [PDF 保留排版译文](pdf-typesetting.md)。
 
 译文 PDF 导出记录 `pdf.translation_export.start / stage / failed / cancelled / download_requested`，用 `requestId` 关联一次导出。阶段为读取快照、排版、保存、请求下载；结果只记录页数、已替换段落数和保留区域数，不记录文件名、正文或异常原文。`download_requested` 表示浏览器已接收下载请求，不代表已经完成磁盘写入。导出取消或失败不修改原文和译文。 失败终态通过 `detail` 中的 `errorCode` 和 `reasonCode` 记录受控分类，区分快照读取、字体下载、模块加载、PDF 解码、加密 PDF、字体嵌入、页面尺寸、排版、无可导出段落、保存、资源清理和下载失败；未知异常使用当前操作的分类或 `unrecognized`，不将异常名称、正文或堆栈写入日志。取消使用 `reasonCode=user_cancelled`，保持 info 级别。
 

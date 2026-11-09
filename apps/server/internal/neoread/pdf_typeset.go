@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const typesetVersion = "babeldoc-0.6.4-neoread-2"
+const typesetVersion = "babeldoc-0.6.4-neoread-3"
 
 type pdfTypesetStatus struct {
 	Pages                int    `json:"pages,omitempty"`
@@ -176,6 +176,7 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 	defer cancel()
 	started, runID := time.Now(), id()
 	status := pdfTypesetStatus{Status: "failed", Revision: revision, Reason: "engine_failed", Pages: snapshot.Manifest.Pages}
+	sourceAnchored, centered := 0, 0
 	s.diagnosticEvent(slog.LevelInfo, "pdf.typeset.start", "runId", runID, "documentId", documentID, "version", typesetVersion)
 	defer func() {
 		if ctx.Err() != nil {
@@ -193,7 +194,7 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 		if status.Status != "complete" && ctx.Err() == nil {
 			level = slog.LevelError
 		}
-		s.diagnosticEvent(level, "pdf.typeset.finish", "runId", runID, "documentId", documentID, "outcome", status.Status, "reasonCode", status.Reason, "durationMs", time.Since(started).Milliseconds(), "translatedBlocks", status.Translated, "preservedBlocks", status.Preserved)
+		s.diagnosticEvent(level, "pdf.typeset.finish", "runId", runID, "documentId", documentID, "outcome", status.Status, "reasonCode", status.Reason, "durationMs", time.Since(started).Milliseconds(), "translatedBlocks", status.Translated, "preservedBlocks", status.Preserved, "sourceAnchoredBlocks", sourceAnchored, "centeredBlocks", centered)
 	}()
 	select {
 	case s.typeset.lane <- struct{}{}:
@@ -263,6 +264,8 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 			Preserved            int    `json:"preserved"`
 			TranslatedCharacters int    `json:"translatedCharacters"`
 			PreservedCharacters  int    `json:"preservedCharacters"`
+			SourceAnchored       int    `json:"sourceAnchored"`
+			Centered             int    `json:"centered"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &event) != nil {
 			continue
@@ -284,10 +287,13 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 			finished = true
 			status.Translated, status.Preserved = event.Translated, event.Preserved
 			status.TranslatedCharacters, status.PreservedCharacters = event.TranslatedCharacters, event.PreservedCharacters
+			if event.SourceAnchored >= 0 && event.SourceAnchored <= event.Translated && event.Centered >= 0 && event.Centered <= event.SourceAnchored {
+				sourceAnchored, centered = event.SourceAnchored, event.Centered
+			}
 		}
 		if event.Type == "error" {
 			switch event.Reason {
-			case "runtime_version", "offline_resource_missing", "no_mapped_translation", "page_mismatch":
+			case "runtime_version", "offline_resource_missing", "no_mapped_translation", "page_mismatch", "layout_overflow":
 				status.Reason = event.Reason
 			}
 		}

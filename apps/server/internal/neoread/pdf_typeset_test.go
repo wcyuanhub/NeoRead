@@ -165,6 +165,24 @@ func TestPDFTypesetRejectsIncompleteWorkerAndCleansWork(t *testing.T) {
 	}
 }
 
+func TestPDFTypesetReportsLayoutOverflowWithoutPublishing(t *testing.T) {
+	s, _, m := translationFixture(t)
+	saveExportTranslation(t, s, m.Blocks[0], "保留的译文")
+	fakeTypesetRuntime(t, s, `printf '{"type":"error","reason":"layout_overflow"}\n'; exit 1`)
+	typesetStatus(t, s, "POST")
+	status := awaitTypeset(t, s)
+	if status.Status != "failed" || status.Reason != "layout_overflow" {
+		t.Fatal(status)
+	}
+	if _, ok := s.cachedTypeset("doc", status.Revision); ok {
+		t.Fatal("overflowing output was published")
+	}
+	snapshot, _, err := s.typesetSnapshot("doc")
+	if err != nil || len(snapshot.Blocks) != 1 || snapshot.Blocks[0].Sentences[0].Target != "保留的译文" {
+		t.Fatal("layout failure changed saved translations", err)
+	}
+}
+
 func TestPDFTypesetCancellationFinishesDocumentTask(t *testing.T) {
 	s, _, m := translationFixture(t)
 	saveExportTranslation(t, s, m.Blocks[0], "译文")
