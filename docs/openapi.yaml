@@ -4,6 +4,78 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/documents/{id}/translations/typeset":
+        {
+          "parameters":
+            [
+              {
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "schema": { "type": "string" },
+              },
+            ],
+          "get":
+            {
+              "summary": "Read locally generated translation PDF status",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Current snapshot status",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/PDFTypesetStatus",
+                                },
+                            },
+                        },
+                    },
+                  "409":
+                    { "description": "Document is unavailable or not parsed" },
+                },
+            },
+          "post":
+            {
+              "summary": "Generate a translation PDF from saved translations without provider calls",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Cached result or unavailable prerequisites",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/PDFTypesetStatus",
+                                },
+                            },
+                        },
+                    },
+                  "202":
+                    {
+                      "description": "Generation queued or running",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/PDFTypesetStatus",
+                                },
+                            },
+                        },
+                    },
+                  "409":
+                    { "description": "Document is unavailable or not parsed" },
+                },
+            },
+        },
       "/api/documents/{id}/navigation":
         {
           "get":
@@ -5591,6 +5663,48 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "PDFTypesetStatus":
+            {
+              "type": "object",
+              "required": ["status", "revision"],
+              "properties":
+                {
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "idle",
+                          "waiting",
+                          "unavailable",
+                          "running",
+                          "complete",
+                          "failed",
+                        ],
+                    },
+                  "revision": { "type": "string" },
+                  "phase":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "parsing",
+                          "layout",
+                          "paragraphs",
+                          "formulas",
+                          "mapping",
+                          "typesetting",
+                          "saving",
+                        ],
+                    },
+                  "reason": { "type": "string" },
+                  "pages": { "type": "integer", "minimum": 1 },
+                  "translated": { "type": "integer", "minimum": 0 },
+                  "preserved": { "type": "integer", "minimum": 0 },
+                  "translatedCharacters": { "type": "integer", "minimum": 0 },
+                  "preservedCharacters": { "type": "integer", "minimum": 0 },
+                },
+            },
           "PaperRefreshProgress":
             {
               "type": "object",

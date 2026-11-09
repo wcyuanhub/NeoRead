@@ -30,6 +30,7 @@ import (
 )
 
 type Server struct {
+	typeset                pdfTypesetState
 	startupSettings        json.RawMessage
 	processingReady        <-chan struct{}
 	chatReservations       map[string]bool
@@ -184,6 +185,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/epub-chapters", s.epubChapters)
 	mux.HandleFunc("GET /api/documents/{id}/epub-chapter", s.epubChapterHTML)
 	mux.HandleFunc("GET /api/documents/{id}/translations", s.documentTranslations)
+	mux.HandleFunc("GET /api/documents/{id}/translations/typeset", s.pdfTypeset)
+	mux.HandleFunc("POST /api/documents/{id}/translations/typeset", s.pdfTypeset)
 	mux.HandleFunc("GET /api/documents/{id}/translations/export", s.exportTranslation)
 	mux.HandleFunc("POST /api/documents/{id}/translations/export", s.exportTranslation)
 	mux.HandleFunc("GET /api/documents/{id}/translations/stream", s.streamTranslations)
@@ -843,6 +846,10 @@ func (s *Server) resource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.Type == "pdf" {
+		if match := typesetResource.FindStringSubmatch(name); match != nil {
+			s.serveTypeset(w, r, d.ID, match[1])
+			return
+		}
 		if name == "snapshot.html" {
 			s.connectorSnapshot(w, r, d.ID)
 			return

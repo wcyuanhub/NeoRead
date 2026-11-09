@@ -6,7 +6,6 @@ import {
 } from "./translation/pdf-export-error";
 import type { Document } from "@neoread/core";
 import { api, publicationURL } from "@neoread/api";
-import workerURL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { downloadBlob, fileTitle } from "./download";
 import { reportDiagnostic } from "./diagnostics";
 import type {
@@ -30,13 +29,6 @@ export async function exportTranslatedPDF(
       durationMs: Math.round(performance.now() - started),
       detail: `phase=${phase}${detail ? ` ${detail}` : ""}`,
     });
-  const font = (path: string) =>
-    exportOperation("font_load", async () => {
-      const response = await fetch(path, { signal });
-      if (!response.ok)
-        throw new Error("PDF 导出字体加载失败，请重新打开应用后重试。");
-      return new Uint8Array(await response.arrayBuffer());
-    });
   event("start");
   onProgress({ phase: "preparing", done: 0, total: 0 });
   try {
@@ -46,61 +38,59 @@ export async function exportTranslatedPDF(
         new Error("译文 PDF 导出仅适用于 PDF 文档"),
       );
     signal.throwIfAborted();
-    const [blocks, translations, cjk, latin, pdfjs, engine] = await Promise.all(
-      [
-        exportOperation("snapshot", () => api.blocks(doc.id, signal)),
-        exportOperation("snapshot", () => api.translations(doc.id, signal)),
-        font("/pdf-assets/export-fonts/NotoSansSC-Regular.ttf"),
-        font("/pdf-assets/standard_fonts/LiberationSans-Regular.ttf"),
-        exportOperation("module_load", () => import("pdfjs-dist")),
-        exportOperation(
-          "module_load",
-          () => import("./translation/pdf-export"),
-        ),
-      ],
-    );
-    signal.throwIfAborted();
     phase = "layout";
     event("stage");
-    pdfjs.GlobalWorkerOptions.workerSrc ||= workerURL;
-    const result = await engine.translatedPDF(
-      pdfjs.getDocument,
-      {
-        url: publicationURL(doc.id, "original.pdf"),
-        cMapUrl: "/pdf-assets/cmaps/",
-        cMapPacked: true,
-        standardFontDataUrl: "/pdf-assets/standard_fonts/",
-        wasmUrl: "/pdf-assets/wasm/",
-      },
-      blocks,
-      translations,
-      { cjk, latin },
-      {
-        signal,
-        onProgress: (progress) => {
-          if (progress.phase === "saving") {
-            phase = "saving";
-            event("stage");
-          }
-          onProgress(progress);
-        },
-      },
+    let status = await exportOperation("snapshot", () =>
+      api.pdfTypeset(doc.id, true, signal),
     );
+    const deadline = performance.now() + 31 * 60_000;
+    while (status.status === "running" || status.status === "idle") {
+      signal.throwIfAborted();
+      if (performance.now() >= deadline)
+        throw new PDFExportError("layout", new Error("排版超时，请稍后重试。"));
+      await pause(signal);
+      status = await exportOperation("snapshot", () =>
+        api.pdfTypeset(doc.id, status.status === "idle", signal),
+      );
+    }
+    if (status.status !== "complete") {
+      const message =
+        status.status === "waiting"
+          ? "请等待翻译完成后再导出。"
+          : status.status === "unavailable"
+            ? "PDF 排版组件未就绪，请先准备组件或安装包含该组件的版本。"
+            : "译文排版未完成，请在保留排版视图中重试。";
+      throw new PDFExportError("layout", new Error(message));
+    }
+    phase = "saving";
+    onProgress({ phase: "saving", done: 0, total: 0 });
+    const blob = await exportOperation("save", async () => {
+      const response = await fetch(
+        publicationURL(doc.id, `typeset/${status.revision}.pdf`),
+        { signal },
+      );
+      if (!response.ok)
+        throw new Error("译文 PDF 读取失败，请重新生成排版后重试。");
+      const value = await response.blob();
+      if ((await value.slice(0, 5).text()) !== "%PDF-")
+        throw new Error("译文 PDF 文件无效，请重试。");
+      return value;
+    });
+    const result = {
+      pages: status.pages ?? 0,
+      translated: status.translated ?? 0,
+      preserved: status.preserved ?? 0,
+      issues: [],
+    };
     signal.throwIfAborted();
     phase = "download";
-    downloadBlob(
-      new Blob([result.bytes as Uint8Array<ArrayBuffer>], {
-        type: "application/pdf",
-      }),
-      `${fileTitle(doc.title)}-译文.pdf`,
-    );
+    downloadBlob(blob, `${fileTitle(doc.title)}-译文.pdf`);
     // Browser download initiation is observable; disk completion is not.
     event(
       "download_requested",
-      `pages=${result.pages} translated=${result.translated} preserved=${result.issues.length}`,
+      `pages=${result.pages} translated=${result.translated} preserved=${result.preserved}`,
     );
-    const { bytes: _bytes, ...summary } = result;
-    return summary;
+    return result;
   } catch (error) {
     event(
       signal.aborted ? "cancelled" : "failed",
@@ -122,4 +112,20 @@ export async function exportTranslatedPDF(
     if (signal.aborted) throw new DOMException("已取消导出", "AbortError");
     throw error;
   }
+}
+
+/** Abort releases the timer/listener; the shared server cache job can finish. */
+function pause(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    signal.throwIfAborted();
+    const cancel = () => {
+      clearTimeout(timer);
+      reject(new DOMException("已取消导出", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, 1000);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
 }

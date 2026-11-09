@@ -409,6 +409,11 @@ export function ExportDocumentDialog({
                   已生成 {pdfResult.pages} 页 PDF，写入 {pdfResult.translated}{" "}
                   个译文段落。
                 </p>
+                {!!pdfResult.preserved && (
+                  <p>
+                    部分公式、图表或未匹配段落保留原文，完整译文可在连续文本中阅读。
+                  </p>
+                )}
                 {pdfResult.issues.length > 0 && (
                   <details>
                     <summary className="cursor-pointer">

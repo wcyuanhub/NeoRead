@@ -43,6 +43,13 @@ if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== `v${app.version}`)
 run(process.execPath, [pnpm, "build"]);
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
+// Fail packaging if the offline runtime cannot be prepared: installed builds
+// must not expose a reader mode with a missing engine.
+run(process.execPath, [join(root, "scripts/prepare-babeldoc.mjs")]);
+await cp(join(root, ".runtime/babeldoc"), join(staging, "babeldoc"), {
+  recursive: true,
+  verbatimSymlinks: true,
+});
 run(process.execPath, [
   pnpm,
   "--filter",

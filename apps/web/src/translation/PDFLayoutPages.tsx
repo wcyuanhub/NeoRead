@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type Ref,
   type RefObject,
+  type ComponentProps,
 } from "react";
 import * as pdfjs from "pdfjs-dist";
 import workerURL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -36,6 +37,7 @@ import { reportDiagnostic } from "../diagnostics";
 import { TranslationText } from "./TranslationText";
 import { translationFont } from "../appearance";
 import "./pdf-layout-reading.css";
+import { TypesetPDFPages } from "./TypesetPDFPages";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerURL;
 
@@ -53,6 +55,32 @@ type TranslationActions = {
 };
 
 export function PDFLayoutPages({
+  generated = false,
+  ...props
+}: ComponentProps<typeof LegacyPDFLayoutPages> & { generated?: boolean }) {
+  if (generated && props.enabled)
+    return (
+      <TypesetPDFPages
+        documentId={props.documentId}
+        revisionKey={JSON.stringify([
+          props.blocks,
+          [...props.translations].filter(
+            ([, item]) => item.status === "complete",
+          ),
+        ])}
+        theme={props.theme}
+        scale={props.scale}
+        host={props.host}
+        blocks={props.blocks}
+        onFollow={props.onFollow}
+        onReady={props.onReady}
+        ref={props.ref}
+      />
+    );
+  return <LegacyPDFLayoutPages {...props} />;
+}
+
+function LegacyPDFLayoutPages({
   documentId,
   blocks,
   translations,

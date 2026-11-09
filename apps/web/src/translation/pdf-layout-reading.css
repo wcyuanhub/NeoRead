@@ -16,6 +16,24 @@
   width: max-content;
   padding-bottom: 50vh;
 }
+.pdf-typeset-summary {
+  position: sticky;
+  left: 0;
+  max-width: 70ch;
+  margin: 12px 20px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.pdf-typeset-anchor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.pdf-typeset-page .textLayer {
+  position: absolute;
+  inset: 0;
+}
 .pdf-layout-page {
   position: relative;
   margin: 20px auto;

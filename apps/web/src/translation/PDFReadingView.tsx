@@ -716,7 +716,11 @@ export function PDFReadingView({
       blocks,
       translations,
     );
-    if (!value) return;
+    if (!value) {
+      selection.current = null;
+      events.selection(null);
+      return;
+    }
     selection.current = value.selection;
     events.selection(value.selection);
   };
@@ -1218,6 +1222,7 @@ export function PDFReadingView({
                   </p>
                 )}
                 <PDFLayoutPages
+                  generated
                   ref={layoutPages}
                   enabled={pageLayout}
                   documentId={doc.id}

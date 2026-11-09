@@ -214,6 +214,9 @@ async function startServer() {
       env: {
         ...childEnv,
         NEOREAD_TOKEN: serverToken,
+        NEOREAD_BABELDOC: app.isPackaged
+          ? join(process.resourcesPath, "babeldoc")
+          : join(root, "..", ".runtime", "babeldoc"),
         NEOREAD_NODE: process.execPath,
         NEOREAD_AGENT: app.isPackaged
           ? join(process.resourcesPath, "agent", "dist", "main.mjs")

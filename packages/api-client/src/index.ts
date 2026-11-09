@@ -185,8 +185,14 @@ export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export type PaperAttachment = components["schemas"]["PaperAttachment"];
 export type PaperRefreshProgress =
   components["schemas"]["PaperRefreshProgress"];
+export type PDFTypesetStatus = components["schemas"]["PDFTypesetStatus"];
 
 export const api = {
+  pdfTypeset: (id: string, start = false, signal?: AbortSignal) =>
+    request<PDFTypesetStatus>(
+      `/api/documents/${encodeURIComponent(id)}/translations/typeset`,
+      { method: start ? "POST" : "GET", signal },
+    ),
   paperRefreshStatus: () =>
     request<PaperRefreshProgress>("/api/diagnostics/paper-refresh"),
   startPaperRefresh: () =>

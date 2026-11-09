@@ -36,6 +36,9 @@ const server = spawn(
     env: {
       ...process.env,
       NEOREAD_TOKEN: token,
+      NEOREAD_BABELDOC: fileURLToPath(
+        new URL("../.runtime/babeldoc", import.meta.url),
+      ),
       NEOREAD_NODE: process.execPath,
       NEOREAD_AGENT: fileURLToPath(
         new URL("../apps/agent/dist/main.mjs", import.meta.url),

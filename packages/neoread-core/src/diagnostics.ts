@@ -154,6 +154,7 @@ export function diagnosticRoute(path: string): string {
     "reparse",
     "providers",
     "translations",
+    "typeset",
     "stream",
     "ai",
     "config",

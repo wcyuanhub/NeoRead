@@ -4,6 +4,7 @@
   "version": "0.10.0",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
+    "prepare:babeldoc": "node scripts/prepare-babeldoc.mjs",
     "dev": "node scripts/prepare-assets.mjs && node scripts/dev.mjs",
     "dev:web": "pnpm --filter @neoread/web dev",
     "dev:server": "cd apps/server && go run ./cmd/neoread-server",

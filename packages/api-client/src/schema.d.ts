@@ -4,6 +4,91 @@
  */
 
 export interface paths {
+    "/api/documents/{id}/translations/typeset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read locally generated translation PDF status */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current snapshot status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PDFTypesetStatus"];
+                    };
+                };
+                /** @description Document is unavailable or not parsed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /** Generate a translation PDF from saved translations without provider calls */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cached result or unavailable prerequisites */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PDFTypesetStatus"];
+                    };
+                };
+                /** @description Generation queued or running */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PDFTypesetStatus"];
+                    };
+                };
+                /** @description Document is unavailable or not parsed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/documents/{id}/navigation": {
         parameters: {
             query?: never;
@@ -4894,6 +4979,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        PDFTypesetStatus: {
+            /** @enum {string} */
+            status: "idle" | "waiting" | "unavailable" | "running" | "complete" | "failed";
+            revision: string;
+            /** @enum {string} */
+            phase?: "parsing" | "layout" | "paragraphs" | "formulas" | "mapping" | "typesetting" | "saving";
+            reason?: string;
+            pages?: number;
+            translated?: number;
+            preserved?: number;
+            translatedCharacters?: number;
+            preservedCharacters?: number;
+        };
         PaperRefreshProgress: {
             /** @enum {string} */
             status: "idle" | "running" | "done" | "interrupted";

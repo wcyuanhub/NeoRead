@@ -3,6 +3,8 @@ dist/
 bin/
 .neoread/
 .reader/
+.runtime/
+__pycache__/
 *.log
 .DS_Store
 coverage/
