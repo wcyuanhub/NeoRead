@@ -19,16 +19,27 @@ function PopoverContent({
   side = "bottom",
   sideOffset = 4,
   anchor,
+  portalContainer,
+  collisionBoundary,
+  positionMethod,
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
-  >) {
+    | "align"
+    | "alignOffset"
+    | "side"
+    | "sideOffset"
+    | "anchor"
+    | "collisionBoundary"
+    | "positionMethod"
+  > & { portalContainer?: PopoverPrimitive.Portal.Props["container"] }) {
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={portalContainer}>
       <PopoverPrimitive.Positioner
         anchor={anchor}
+        collisionBoundary={collisionBoundary}
+        positionMethod={positionMethod}
         align={align}
         alignOffset={alignOffset}
         side={side}

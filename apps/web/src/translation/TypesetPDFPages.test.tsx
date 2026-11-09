@@ -51,6 +51,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   vi.mocked(api.pdfTypesetPositions).mockImplementation(
     async (_doc, revision) => ({ version: 1, revision, blocks: [] }),
   );
@@ -104,7 +112,10 @@ it("polls a running job and starts after translation becomes ready", async () =>
     .mockResolvedValueOnce({ status: "idle", revision: "new" })
     .mockResolvedValue({ status: "running", revision: "new" });
   await act(async () => root.render(<TypesetPDFPages {...props()} />));
-  expect(container.textContent).toContain("已完成的译文");
+  expect(container.textContent).toContain("当前显示原文");
+  expect(pdfjs.getDocument).toHaveBeenCalledWith(
+    expect.objectContaining({ url: "/pub/cap/doc/original.pdf" }),
+  );
   await act(async () => vi.advanceTimersByTimeAsync(1500));
   expect(api.pdfTypeset).toHaveBeenNthCalledWith(
     2,
@@ -121,7 +132,7 @@ it("polls a running job and starts after translation becomes ready", async () =>
   expect(container.textContent).toContain("正在生成译文排版");
 });
 
-it("shows unavailable resources without silently showing English pages", async () => {
+it("keeps original page geometry with an explicit status when the typesetter is unavailable", async () => {
   vi.mocked(api.pdfTypeset).mockResolvedValue({
     status: "unavailable",
     revision: "a",
@@ -131,7 +142,11 @@ it("shows unavailable resources without silently showing English pages", async (
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "排版组件",
   );
-  expect(pdfjs.getDocument).not.toHaveBeenCalled();
+  expect(pdfjs.getDocument).toHaveBeenCalledWith(
+    expect.objectContaining({ url: "/pub/cap/doc/original.pdf" }),
+  );
+  expect(container.textContent).toContain("当前显示原文");
+  expect(container.querySelector(".pdf-typeset-page")).not.toBeNull();
   await act(async () => vi.advanceTimersByTimeAsync(10000));
   expect(api.pdfTypeset).toHaveBeenCalledTimes(1);
 });
@@ -150,7 +165,9 @@ it("discards a late result from a previous translation snapshot", async () => {
     root.render(<TypesetPDFPages {...props()} revisionKey="second" />),
   );
   await act(async () => resolve({ status: "complete", revision: "stale" }));
-  expect(pdfjs.getDocument).not.toHaveBeenCalled();
+  expect(pdfjs.getDocument).not.toHaveBeenCalledWith(
+    expect.objectContaining({ url: expect.stringContaining("typeset/stale") }),
+  );
 });
 
 it("releases the PDF and observers when a generated document changes", async () => {
@@ -200,7 +217,7 @@ const position = {
   ],
 };
 
-it("keeps full saved text and retry actions available during generation and failure", async () => {
+it("keeps saved text and retry actions in a contained popover during generation and failure", async () => {
   vi.mocked(api.pdfTypeset).mockResolvedValue({
     status: "unavailable",
     revision: "a",
@@ -212,9 +229,19 @@ it("keeps full saved text and retry actions available during generation and fail
     translations: new Map([[saved.blockId, saved]]),
   };
   await act(async () => root.render(<TypesetPDFPages {...p} />));
+  expect(container.querySelector('[data-sentence="0"]')).toBeNull();
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(".pdf-typeset-unmapped button")!
+      .click(),
+  );
   expect(container.querySelector('[data-sentence="0"]')?.textContent).toBe(
     "完整译文。",
   );
+  expect(
+    container.querySelector(".pdf-layout-pages .pdf-typeset-detail"),
+  ).toBeNull();
+  expect(container.querySelector(".pdf-typeset-detail")).not.toBeNull();
   await act(async () =>
     Array.from(container.querySelectorAll("button"))
       .find((b) => b.textContent === "重新翻译此段")!
@@ -252,10 +279,11 @@ it("rejects stale target positions and uses the full interactive translation in 
     ),
   );
   expect(container.querySelector(".pdf-typeset-block")).toBeNull();
+  expect(container.querySelector(".pdf-typeset-fallback")).toBeNull();
+  expect(container.querySelector("[data-translation-block]")).toBeNull();
+  await act(async () => handle.current!.focusBlock!(sourceBlock.id, 0));
   expect(
-    container.querySelector(
-      '[aria-label="第 1 页补充译文"] [data-translation-block]',
-    ),
+    container.querySelector(".pdf-typeset-detail [data-translation-block]"),
   ).not.toBeNull();
 });
 it("uses verified relocated bounds, keeps actions, and can reveal formatted content without duplicate block identities", async () => {
@@ -294,9 +322,114 @@ it("uses verified relocated bounds, keeps actions, and can reveal formatted cont
     container.querySelectorAll(`[data-translation-block="${sourceBlock.id}"]`),
   ).toHaveLength(1);
   expect(
-    container.querySelector(".pdf-typeset-fallback [data-sentence]")
-      ?.textContent,
+    container.querySelector(".pdf-typeset-detail [data-sentence]")?.textContent,
   ).toBe("完整译文。");
+  expect(p.onReady).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    Array.from(mapped.querySelectorAll("button"))
+      .find((b) => b.textContent === "完整译文")!
+      .click(),
+  );
+  expect(
+    container.querySelectorAll(`[data-translation-block="${sourceBlock.id}"]`),
+  ).toHaveLength(1);
+  expect(
+    container.querySelector(".pdf-typeset-block [data-translation-block]"),
+  ).not.toBeNull();
+  expect(p.onReady).toHaveBeenCalledTimes(1);
+});
+
+it("never inserts untranslated interaction details between fixed PDF pages or changes scrolling when details open", async () => {
+  vi.mocked(api.pdfTypeset).mockResolvedValue({
+    status: "complete",
+    revision: "a",
+  });
+  vi.mocked(pdfjs.getDocument).mockReturnValue({
+    promise: Promise.resolve({
+      numPages: 3,
+      getPage: async () => ({
+        getViewport: () => ({ width: 600, height: 800 }),
+      }),
+    }),
+    destroy,
+  } as unknown as pdfjs.PDFDocumentLoadingTask);
+  const blocks = [1, 2, 3].map((page) => ({
+    ...sourceBlock,
+    id: `p${page}-b1`,
+    page,
+  }));
+  const p = {
+    ...props(),
+    blocks,
+    translations: new Map(
+      blocks.map((b) => [b.id, { ...saved, blockId: b.id }]),
+    ),
+    renderBlock: vi.fn((b: PDFBlock) => (
+      <section data-translation-block={b.id}>
+        <span data-sentence="0">{"很长的译文。".repeat(1000)}</span>
+      </section>
+    )),
+  };
+  await act(async () => root.render(<TypesetPDFPages {...p} />));
+  const pages = container.querySelector(".pdf-layout-pages")!;
+  Object.defineProperty(container, "clientWidth", {
+    value: 320,
+    configurable: true,
+  });
+  expect(p.renderBlock).not.toHaveBeenCalled();
+  expect(pages.children).toHaveLength(3);
+  const sizes = Array.from(
+    container.querySelectorAll<HTMLElement>(".pdf-typeset-page"),
+  ).map((p) => [p.style.width, p.style.height]);
+  expect(sizes).toHaveLength(3);
+  for (const [width, height] of sizes) {
+    expect(Number.parseFloat(width)).toBeCloseTo(800);
+    expect(Number.parseFloat(height)).toBeCloseTo((800 * 96) / 72);
+  }
+  container.scrollTop = 1000;
+  await act(async () =>
+    container
+      .querySelectorAll<HTMLButtonElement>(".pdf-typeset-unmapped button")[1]
+      .click(),
+  );
+  expect(container.scrollTop).toBe(1000);
+  expect(p.onReady).toHaveBeenCalledTimes(1);
+  expect(
+    container.querySelector<HTMLElement>(".pdf-typeset-detail")!.style.width,
+  ).toBe("288px");
+  expect(pages.children).toHaveLength(3);
+  expect(pages.querySelector("[data-translation-block]")).toBeNull();
+  expect(
+    container
+      .querySelector(".pdf-typeset-detail [data-translation-block]")
+      ?.getAttribute("data-translation-block"),
+  ).toBe("p2-b1");
+});
+
+it("replaces original pages with the generated PDF when ready without using original coordinates as verified text", async () => {
+  vi.mocked(api.pdfTypeset)
+    .mockResolvedValueOnce({ status: "running", revision: "a" })
+    .mockResolvedValue({ status: "complete", revision: "a" });
+  const p = {
+    ...props(),
+    blocks: [sourceBlock],
+    translations: new Map([[saved.blockId, saved]]),
+  };
+  await act(async () => root.render(<TypesetPDFPages {...p} />));
+  expect(container.textContent).toContain("当前显示原文");
+  expect(container.querySelector(".pdf-typeset-block")).toBeNull();
+  expect(api.pdfTypesetPositions).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTimeAsync(1500));
+  expect(destroy).toHaveBeenCalledTimes(1);
+  expect(pdfjs.getDocument).toHaveBeenLastCalledWith(
+    expect.objectContaining({ url: "/pub/cap/doc/typeset/a.pdf" }),
+  );
+  expect(api.pdfTypesetPositions).toHaveBeenCalledWith(
+    "doc",
+    "a",
+    expect.any(AbortSignal),
+  );
+  expect(container.textContent).not.toContain("当前显示原文");
 });
 it("does not activate positions returned for a different generated PDF", async () => {
   vi.mocked(api.pdfTypeset).mockResolvedValue({

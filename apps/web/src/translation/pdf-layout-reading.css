@@ -16,14 +16,6 @@
   width: max-content;
   padding-bottom: 50vh;
 }
-.pdf-typeset-summary {
-  position: sticky;
-  left: 0;
-  max-width: 70ch;
-  margin: 12px 20px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
 .pdf-typeset-anchor {
   position: absolute;
   width: 1px;
@@ -222,23 +214,71 @@
   height: 26px;
   font-size: 12px;
 }
-.pdf-typeset-fallback {
-  max-width: 52rem;
-  width: min(100%, 52rem);
-  padding: 16px 24px;
-  margin: 0 auto 24px;
-  border-top: 1px solid var(--border);
-  white-space: normal;
-}
-.pdf-typeset-fallback .pdf-typeset-summary {
-  margin: 0 0 16px;
-}
-.pdf-typeset-fallback-block {
-  margin: 16px 0;
-}
-.pdf-typeset-fallback-block > section {
-  margin-bottom: 4px;
-}
 .pdf-typeset-text ::selection {
   color: transparent;
+}
+.pdf-typeset-pages {
+  position: relative;
+}
+.pdf-typeset-status {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(32rem, calc(100% - 32px));
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--background);
+  box-shadow: 0 1px 8px #00000012;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pdf-typeset-pending {
+  position: relative;
+  min-height: 80px;
+}
+.pdf-typeset-unmapped {
+  position: absolute;
+  z-index: 3;
+  transform: translateX(-100%);
+}
+.pdf-typeset-unmapped > button {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.pdf-typeset-unmapped > button:hover,
+.pdf-typeset-unmapped > button:focus-visible {
+  opacity: 1;
+}
+.pdf-typeset-detail {
+  max-width: calc(100vw - 32px);
+  max-height: min(65vh, 38rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 1.8;
+}
+.pdf-typeset-detail::-webkit-scrollbar {
+  display: none;
+}
+.pdf-typeset-detail .message-markdown {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pdf-typeset-detail img {
+  max-width: 100%;
+  height: auto;
 }

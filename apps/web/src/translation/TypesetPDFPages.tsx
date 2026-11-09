@@ -16,6 +16,11 @@ import {
   type PDFTypesetPositionBlock,
 } from "@neoread/api";
 import { Button } from "@neoread/ui/components/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@neoread/ui/components/popover";
 import type {
   PDFBlock,
   PDFPageViewport,
@@ -35,10 +40,11 @@ import {
 
 const explanations: Record<string, string> = {
   runtime_missing:
-    "当前版本未包含 PDF 排版组件。已有译文可在下方继续阅读和批注。",
-  translation_pending: "正在等待译文，已完成的内容可继续阅读。",
+    "PDF 排版组件未就绪，当前显示原文。可点击段落旁的「译文」查看已有译文。",
+  translation_pending: "正在等待译文，当前显示原文。",
   offline_resource_missing: "排版资源不完整，请重新准备排版组件。",
-  no_mapped_translation: "暂时无法生成译文页面，已有译文可在下方阅读。",
+  no_mapped_translation:
+    "暂时无法生成译文页面，当前显示原文。可点击段落旁的「译文」查看已有译文。",
   snapshot_changed: "译文已更新，请重新生成排版。",
   cancelled: "排版已中断，可以重试。",
 };
@@ -89,8 +95,9 @@ export function TypesetPDFPages({
     pdf: pdfjs.PDFDocumentProxy;
     sizes: { width: number; height: number }[];
     positions: PDFTypesetPositions;
+    generated: boolean;
   }>();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<string>();
   const nodes = useRef(new Map<number, HTMLDivElement>());
   const desired = useRef<PDFPageViewport | undefined>(undefined);
   const anchor = useRef<
@@ -111,6 +118,24 @@ export function TypesetPDFPages({
     host.current
       ? pageViewport(host.current, [...nodes.current.values()], scale)
       : undefined;
+  const revealDetail = (node: HTMLElement, blockId: string) => {
+    const requested = anchor.current;
+    if (requested?.blockId !== blockId || requested.sentence === undefined)
+      return;
+    const sentence = node.querySelector(
+      `[data-sentence="${requested.sentence}"]`,
+    );
+    if (!sentence) return;
+    const range = document.createRange();
+    range.selectNodeContents(sentence);
+    node.scrollTop = Math.max(
+      0,
+      node.scrollTop +
+        range.getBoundingClientRect().top -
+        node.getBoundingClientRect().top -
+        12,
+    );
+  };
   const focusBlock = (blockId: string, sentence?: number, center = true) => {
     anchor.current = { blockId, sentence, center };
     const section = Array.from(
@@ -118,13 +143,30 @@ export function TypesetPDFPages({
         [],
     ).find((n) => n.dataset.translationBlock === blockId);
     const container = host.current;
-    if (!section || !container) return false;
+    if (!container) return false;
+    const block = blocks.find((b) => b.id === blockId);
+    const detail = section?.closest(".pdf-typeset-detail");
+    const needsDetail = !section || !!detail;
+    if (needsDetail && (!block || !loaded || !translations.has(blockId)))
+      return false;
+    if (needsDetail) setExpanded(blockId);
     const target =
       sentence === undefined
         ? section
-        : section.querySelector<HTMLElement>(`[data-sentence="${sentence}"]`);
-    let rect = section.getBoundingClientRect();
-    if (target && target.textContent) {
+        : section?.querySelector<HTMLElement>(`[data-sentence="${sentence}"]`);
+    let rect = section?.getBoundingClientRect();
+    if (needsDetail && block) {
+      const page = nodes.current.get(block.page)?.getBoundingClientRect();
+      if (!page) return false;
+      const b = block.bounds;
+      rect = new DOMRect(
+        page.left + b.x * page.width,
+        page.top + b.y * page.height,
+        b.width * page.width,
+        b.height * page.height,
+      );
+      if (detail instanceof HTMLElement) revealDetail(detail, blockId);
+    } else if (target && target.textContent) {
       const range = document.createRange();
       range.selectNodeContents(target);
       rect = range.getBoundingClientRect();
@@ -132,7 +174,6 @@ export function TypesetPDFPages({
       const position = loaded?.positions.blocks.find(
         (p) => p.blockId === blockId,
       );
-      const block = blocks.find((b) => b.id === blockId);
       if (
         block &&
         currentPosition(position, block, translations.get(blockId)) &&
@@ -149,6 +190,7 @@ export function TypesetPDFPages({
           );
       }
     }
+    if (!rect) return false;
     callbacks.current.onFollow();
     const view = container.getBoundingClientRect();
     container.scrollTop +=
@@ -186,7 +228,7 @@ export function TypesetPDFPages({
   useEffect(() => {
     anchor.current = undefined;
     desired.current = undefined;
-    setExpanded(new Set());
+    setExpanded(undefined);
   }, [documentId]);
   useEffect(() => {
     let stopped = false;
@@ -214,13 +256,17 @@ export function TypesetPDFPages({
     };
   }, [documentId, revisionKey, retry]);
   const revision = status?.status === "complete" ? status.revision : undefined;
+  const resource = status ? revision || "original" : undefined;
   useEffect(() => {
     setLoaded(undefined);
-    if (!revision) return;
+    if (!resource) return;
     let stopped = false;
     const controller = new AbortController();
     const task = pdfjs.getDocument({
-      url: publicationURL(documentId, `typeset/${revision}.pdf`),
+      url: publicationURL(
+        documentId,
+        revision ? `typeset/${revision}.pdf` : "original.pdf",
+      ),
       cMapUrl: "/pdf-assets/cmaps/",
       cMapPacked: true,
       standardFontDataUrl: "/pdf-assets/standard_fonts/",
@@ -229,9 +275,18 @@ export function TypesetPDFPages({
     void (async () => {
       const [pdf, positions] = await Promise.all([
         task.promise,
-        api.pdfTypesetPositions(documentId, revision, controller.signal),
+        revision
+          ? api.pdfTypesetPositions(documentId, revision, controller.signal)
+          : Promise.resolve({
+              version: 1,
+              revision: "",
+              blocks: [],
+            } as PDFTypesetPositions),
       ]);
-      if (positions.version !== 1 || positions.revision !== revision)
+      if (
+        positions.version !== 1 ||
+        (revision && positions.revision !== revision)
+      )
         throw new Error("invalid positions");
       const sizes = [];
       for (let number = 1; number <= pdf.numPages; number++) {
@@ -241,7 +296,7 @@ export function TypesetPDFPages({
         });
         sizes.push({ width, height });
       }
-      if (!stopped) setLoaded({ pdf, sizes, positions });
+      if (!stopped) setLoaded({ pdf, sizes, positions, generated: !!revision });
     })().catch(() => {
       if (!stopped) {
         setFailed(true);
@@ -253,7 +308,7 @@ export function TypesetPDFPages({
       controller.abort();
       void task.destroy();
     };
-  }, [documentId, revision]);
+  }, [documentId, resource]);
   useLayoutEffect(() => {
     const saved = anchor.current;
     if (loaded) {
@@ -261,7 +316,7 @@ export function TypesetPDFPages({
       if (saved) focusBlock(saved.blockId, saved.sentence, saved.center);
       else if (desired.current) follow(desired.current);
     }
-  }, [loaded, scale, expanded]);
+  }, [loaded, scale]);
   useEffect(() => {
     const node = host.current;
     const remember = () => {
@@ -274,7 +329,11 @@ export function TypesetPDFPages({
       const section = sections
         .filter((s) => {
           const r = s.getBoundingClientRect();
-          return r.bottom > view.top && r.top < view.bottom;
+          return (
+            !s.closest(".pdf-typeset-detail") &&
+            r.bottom > view.top &&
+            r.top < view.bottom
+          );
         })
         .sort(
           (a, b) =>
@@ -290,60 +349,46 @@ export function TypesetPDFPages({
     node?.addEventListener("scroll", remember);
     return () => node?.removeEventListener("scroll", remember);
   }, [loaded, scale]);
-  const full = (block: PDFBlock) => (
-    <div key={block.id} className="pdf-typeset-fallback-block">
-      {renderBlock(block)}
-      <Button
-        variant="ghost"
-        size="sm"
-        data-block-action
-        onClick={() => onRetry(block.id)}
-      >
-        重新翻译此段
-      </Button>
+  const error =
+    failed || status?.status === "failed" || status?.status === "unavailable";
+  const message = failed
+    ? "译文排版加载失败，请重试。"
+    : (explanations[status?.reason ?? ""] ??
+      (status?.status === "failed"
+        ? "译文排版失败，当前显示原文。可点击段落旁的「译文」查看已有译文。"
+        : status?.status === "complete"
+          ? "正在加载译文页面…"
+          : status?.status === "waiting"
+            ? "正在等待译文，当前显示原文。"
+            : `${phases[status?.phase ?? ""] ?? "正在生成译文排版…"}当前显示原文。`));
+  const statusMessage = (
+    <div className="pdf-typeset-status" role={error ? "alert" : "status"}>
+      <span>{message}</span>
+      {error && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setRetry((v) => v + 1)}
+        >
+          重试排版
+        </Button>
+      )}
     </div>
   );
-  if (!loaded) {
-    const error =
-      failed || status?.status === "failed" || status?.status === "unavailable";
-    return (
-      <div className="pdf-typeset-pending">
-        <div className="pdf-layout-message" role={error ? "alert" : "status"}>
-          <p>
-            {failed
-              ? "译文排版加载失败，已有译文可继续阅读。"
-              : (explanations[status?.reason ?? ""] ??
-                (status?.status === "complete"
-                  ? "正在加载译文页面…"
-                  : status?.status === "waiting"
-                    ? "正在等待翻译，已完成的译文可继续阅读。"
-                    : (phases[status?.phase ?? ""] ?? "正在生成译文排版…")))}
-          </p>
-          {error && (
-            <Button variant="outline" onClick={() => setRetry((v) => v + 1)}>
-              重试排版
-            </Button>
-          )}
-        </div>
-        <div className="pdf-typeset-fallback">
-          {blocks.filter((b) => translations.has(b.id)).map(full)}
-        </div>
-      </div>
-    );
-  }
+  if (!loaded)
+    return <div className="pdf-typeset-pending">{statusMessage}</div>;
   const positions = new Map(loaded.positions.blocks.map((p) => [p.blockId, p]));
   return (
     <div className="pdf-layout-pages pdf-typeset-pages">
+      {!loaded.generated && statusMessage}
       {loaded.sizes.map((size, index) => {
         const pageBlocks = blocks.filter((b) => b.page === index + 1);
         const mapped = pageBlocks.flatMap((block) => {
-          const position = expanded.has(block.id)
-            ? undefined
-            : currentPosition(
-                positions.get(block.id),
-                block,
-                translations.get(block.id),
-              );
+          const position = currentPosition(
+            positions.get(block.id),
+            block,
+            translations.get(block.id),
+          );
           return position ? [{ block, position }] : [];
         });
         const mappedIds = new Set(mapped.map((m) => m.block.id));
@@ -366,44 +411,15 @@ export function TypesetPDFPages({
               renderBlock={renderBlock}
               onRetry={onRetry}
               onCitation={onCitation}
-              onExpand={(blockId) => {
-                anchor.current = { blockId, center: true };
-                setExpanded((previous) => new Set([...previous, blockId]));
-              }}
+              fallback={fallback}
+              expanded={expanded}
+              onExpand={setExpanded}
+              onDetailReady={revealDetail}
               pageRef={(node) => {
                 if (node) nodes.current.set(index + 1, node);
                 else nodes.current.delete(index + 1);
               }}
             />
-            {fallback.length > 0 && (
-              <div
-                className="pdf-typeset-fallback"
-                aria-label={`第 ${index + 1} 页补充译文`}
-              >
-                <p className="pdf-typeset-summary">第 {index + 1} 页补充译文</p>
-                {fallback.map((block) => (
-                  <div key={block.id}>
-                    {full(block)}
-                    {expanded.has(block.id) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          anchor.current = { blockId: block.id, center: true };
-                          setExpanded((previous) => {
-                            const next = new Set(previous);
-                            next.delete(block.id);
-                            return next;
-                          });
-                        }}
-                      >
-                        返回页面文字
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         );
       })}
@@ -424,6 +440,9 @@ function TypesetPage({
   onRetry,
   onCitation,
   onExpand,
+  fallback,
+  expanded,
+  onDetailReady,
   pageRef,
 }: {
   pdf: pdfjs.PDFDocumentProxy;
@@ -436,7 +455,10 @@ function TypesetPage({
   renderBlock: TypesetBlockRenderer;
   onRetry: (blockId: string) => void;
   onCitation: (blockId: string, label: string) => void;
-  onExpand: (blockId: string) => void;
+  onExpand: (blockId: string | undefined) => void;
+  fallback: PDFBlock[];
+  expanded?: string;
+  onDetailReady: (node: HTMLElement, blockId: string) => void;
   pageRef: (node: HTMLDivElement | null) => void;
 }) {
   const frame = useRef<HTMLDivElement>(null),
@@ -587,30 +609,33 @@ function TypesetPage({
               height: b.height * height,
             }}
           >
-            {renderBlock(
-              block,
-              visible ? (
-                <TypesetSentences
-                  position={position}
-                  bounds={b}
-                  width={width}
-                  height={height}
-                  onCitation={onCitation}
-                />
-              ) : null,
-              {
-                className: "pdf-typeset-text",
-                style: { width: "100%", height: "100%" },
-              },
-            )}
+            {expanded !== block.id &&
+              renderBlock(
+                block,
+                visible ? (
+                  <TypesetSentences
+                    position={position}
+                    bounds={b}
+                    width={width}
+                    height={height}
+                    onCitation={onCitation}
+                  />
+                ) : null,
+                {
+                  className: "pdf-typeset-text",
+                  style: { width: "100%", height: "100%" },
+                },
+              )}
             <div className="pdf-typeset-actions" data-block-action>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onExpand(block.id)}
-              >
-                完整译文
-              </Button>
+              <TypesetDetail
+                block={block}
+                open={expanded === block.id}
+                onOpenChange={onExpand}
+                host={host}
+                renderBlock={renderBlock}
+                onRetry={onRetry}
+                onReady={onDetailReady}
+              />
               <Button
                 variant="secondary"
                 size="sm"
@@ -622,6 +647,97 @@ function TypesetPage({
           </div>
         );
       })}
+      {fallback.map((block) => (
+        <div
+          key={block.id}
+          className="pdf-typeset-unmapped"
+          data-typeset-block={block.id}
+          style={{
+            left: Math.min(0.94, block.bounds.x + block.bounds.width) * width,
+            top: block.bounds.y * height,
+          }}
+        >
+          <TypesetDetail
+            block={block}
+            open={expanded === block.id}
+            onOpenChange={onExpand}
+            host={host}
+            renderBlock={renderBlock}
+            onRetry={onRetry}
+            onReady={onDetailReady}
+            unmapped
+          />
+        </div>
+      ))}
     </div>
+  );
+}
+
+function TypesetDetail({
+  block,
+  open,
+  onOpenChange,
+  host,
+  renderBlock,
+  onRetry,
+  onReady,
+  unmapped = false,
+}: {
+  block: PDFBlock;
+  open: boolean;
+  onOpenChange: (id: string | undefined) => void;
+  host: RefObject<HTMLDivElement | null>;
+  renderBlock: TypesetBlockRenderer;
+  onRetry: (id: string) => void;
+  onReady: (node: HTMLElement, blockId: string) => void;
+  unmapped?: boolean;
+}) {
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(value) => onOpenChange(value ? block.id : undefined)}
+    >
+      <PopoverTrigger
+        render={
+          <Button
+            variant="secondary"
+            size="sm"
+            data-block-action
+            aria-label={`查看第 ${block.page} 页段落完整译文`}
+          />
+        }
+      >
+        {unmapped ? "译文" : "完整译文"}
+      </PopoverTrigger>
+      <PopoverContent
+        ref={(node) => {
+          if (node) onReady(node, block.id);
+        }}
+        portalContainer={host}
+        collisionBoundary={host.current ?? undefined}
+        positionMethod="fixed"
+        className="pdf-typeset-detail"
+        side="left"
+        align="start"
+        initialFocus={false}
+        finalFocus={false}
+        style={{
+          width: Math.max(
+            160,
+            Math.min(520, (host.current?.clientWidth || 552) - 32),
+          ),
+        }}
+      >
+        {open && renderBlock(block)}
+        <Button
+          variant="ghost"
+          size="sm"
+          data-block-action
+          onClick={() => onRetry(block.id)}
+        >
+          重新翻译此段
+        </Button>
+      </PopoverContent>
+    </Popover>
   );
 }
