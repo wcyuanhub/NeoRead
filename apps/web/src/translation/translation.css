@@ -252,7 +252,8 @@
   color: #1f1e1d;
 }
 
-.textLayer ::highlight(neoread-linked-sentences) {
+.textLayer ::highlight(neoread-linked-sentences),
+.pdf-typeset-text ::highlight(neoread-linked-sentences) {
   /* A subtle linked-sentence cue; visible glyphs remain on the PDF canvas. */
   background-color: rgba(128, 128, 128, 0.22);
   color: transparent;

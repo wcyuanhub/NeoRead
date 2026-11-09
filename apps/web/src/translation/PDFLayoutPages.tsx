@@ -11,6 +11,7 @@ import {
   type Ref,
   type RefObject,
   type ComponentProps,
+  type CSSProperties,
 } from "react";
 import * as pdfjs from "pdfjs-dist";
 import workerURL from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -46,6 +47,11 @@ export type PDFLayoutHandle = {
   follow: (viewport: PDFPageViewport) => void;
   goTo: (location: PDFLocation) => void;
   getViewport: () => PDFPageViewport | undefined;
+  focusBlock?: (
+    blockId: string,
+    sentence?: number,
+    center?: boolean,
+  ) => boolean;
 };
 type RenderBlock = (block: PDFBlock, content?: ReactNode) => ReactNode;
 type TranslationActions = {
@@ -58,9 +64,45 @@ export function PDFLayoutPages({
   generated = false,
   ...props
 }: ComponentProps<typeof LegacyPDFLayoutPages> & { generated?: boolean }) {
-  if (generated && props.enabled)
+  if (generated && props.enabled) {
+    const sections = new Map(
+      Children.toArray(props.children).flatMap((child) =>
+        isValidElement<{
+          "data-translation-block": string;
+          children: ReactNode;
+          className?: string;
+          style?: CSSProperties;
+        }>(child)
+          ? [[child.props["data-translation-block"], child] as const]
+          : [],
+      ),
+    );
     return (
       <TypesetPDFPages
+        key={props.documentId}
+        translations={props.translations}
+        onRetry={props.onRetry}
+        onCitation={props.onCitation}
+        renderBlock={(block, content, extra) => {
+          const section = sections.get(block.id);
+          return section
+            ? content === undefined
+              ? section
+              : cloneElement(
+                  section,
+                  {
+                    ...extra,
+                    className: `${section.props.className ?? ""} ${extra?.className ?? ""}`,
+                  },
+                  content,
+                  ...Children.toArray(section.props.children).filter(
+                    (child) =>
+                      isValidElement<{ className?: string }>(child) &&
+                      child.props.className === "translation-note-indicator",
+                  ),
+                )
+            : null;
+        }}
         documentId={props.documentId}
         revisionKey={JSON.stringify([
           props.blocks,
@@ -77,6 +119,7 @@ export function PDFLayoutPages({
         ref={props.ref}
       />
     );
+  }
   return <LegacyPDFLayoutPages {...props} />;
 }
 

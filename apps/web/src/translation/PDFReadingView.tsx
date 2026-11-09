@@ -255,6 +255,15 @@ export function PDFReadingView({
     sentenceIndex?: number,
     options: { smooth?: boolean; center?: boolean } = {},
   ) => {
+    if (
+      pageLayout &&
+      layoutPages.current?.focusBlock?.(
+        anchor.blockId,
+        sentenceIndex,
+        options.center !== false,
+      )
+    )
+      return;
     const node = targetNode(anchor.blockId),
       host = pane.current;
     if (!node || !host) return;
@@ -332,13 +341,8 @@ export function PDFReadingView({
         if (operation === motion.operation) {
           motion.moving = false;
           setFocusedBlock(undefined);
-          if (pageLayout && mode === "parallel") {
-            const viewport = layoutPages.current?.getViewport();
-            if (viewport) {
-              lastViewport.current = viewport;
-              engine?.followPDFViewport?.(viewport);
-            }
-          }
+          if (pageLayout)
+            lastViewport.current = layoutPages.current?.getViewport();
           control.current.following(origin);
         }
       });
@@ -398,6 +402,20 @@ export function PDFReadingView({
     await engine?.goTo(location);
     if (location.type !== "pdf") return;
     if (pageLayout) {
+      const block = locationBlock(location);
+      if (
+        block &&
+        (location.translation ||
+          location.sentenceLink ||
+          location.rects?.length ||
+          location.sourceAnchors?.length) &&
+        layoutPages.current?.focusBlock?.(
+          block.id,
+          location.translation?.sentenceIndexes[0] ??
+            location.sentenceLink?.parts[0]?.sentenceIndex,
+        )
+      )
+        return;
       const viewport = engine?.getPDFViewport?.();
       if (viewport) {
         lastViewport.current = viewport;
@@ -436,6 +454,12 @@ export function PDFReadingView({
     const operation = explicitFocus.current.operation;
     await completed;
     if (operation !== explicitFocus.current.operation) return;
+    if (location.type === "pdf" && pageLayout && mode !== "source" && block)
+      layoutPages.current?.focusBlock?.(
+        block.id,
+        location.translation?.sentenceIndexes[0] ??
+          location.sentenceLink?.parts[0]?.sentenceIndex,
+      );
     if (location.type === "pdf" && mode !== "translation")
       engine?.flashReference?.(location, location.quote ?? "");
   };

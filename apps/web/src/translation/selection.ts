@@ -17,6 +17,18 @@ export function translatedSelection(
   blocks: (PDFBlock | EPUBReadingBlock)[],
   translations: TranslationBlock[],
 ) {
+  for (const node of host.querySelectorAll<HTMLElement>(
+    "[data-typeset-original]",
+  )) {
+    if (!range.intersectsNode(node)) continue;
+    const part = document.createRange();
+    part.selectNodeContents(node);
+    if (range.compareBoundaryPoints(Range.START_TO_START, part) > 0)
+      part.setStart(range.startContainer, range.startOffset);
+    if (range.compareBoundaryPoints(Range.END_TO_END, part) < 0)
+      part.setEnd(range.endContainer, range.endOffset);
+    if (part.toString().trim()) return;
+  }
   const ranges: NonNullable<TranslationLocation["ranges"]> = [];
   const passages: PDFPassage[] = [],
     links: PDFSentenceLink[] = [];

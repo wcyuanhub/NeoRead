@@ -35,13 +35,17 @@ export function translatedAnnotationRanges(
     const mark = annotation.location.translation;
     if (!mark) continue;
     for (const part of mark.ranges ?? [{ ...mark, quote: annotation.quote }]) {
+      const translation = translations.find(
+        (t) =>
+          t.blockId === part.blockId &&
+          t.sourceHash === part.sourceHash &&
+          t.status === "complete",
+      );
+      if (!translation) continue;
       if (
-        !translations.some(
-          (t) =>
-            t.blockId === part.blockId &&
-            t.sourceHash === part.sourceHash &&
-            t.status === "complete",
-        )
+        part.targetText &&
+        !part.recovered &&
+        part.targetText !== translation.sentences.map((s) => s.target).join("")
       )
         continue;
       const node = Array.from(
@@ -60,6 +64,17 @@ export function translatedAnnotationRanges(
       const range = textRange(node, part.start, part.end);
       if (range?.toString().trim() === part.quote.trim())
         result.push({ annotation, range });
+      else {
+        // The same saved translation has different Markdown/line geometry in
+        // the two views. Resolve inside its recorded sentence window only.
+        const aligned = recoveredAnnotationRange(
+          node,
+          part.sentenceIndexes,
+          part.wholeSentence ? "" : part.quote,
+          true,
+        );
+        if (aligned) result.push({ annotation, range: aligned });
+      }
     }
   }
   return result;
@@ -107,6 +122,7 @@ function recoveredAnnotationRange(
   root: HTMLElement,
   indexes: number[],
   quote: string,
+  strict = false,
 ): Range | undefined {
   const sentences = indexes.map((i) =>
     root.querySelector<HTMLElement>(`[data-sentence="${i}"]`),
@@ -124,7 +140,7 @@ function recoveredAnnotationRange(
   const whole = () => textRange(root, base, base + text.length);
   if (!quote) return whole();
   let start = text.indexOf(quote);
-  if (start >= 0)
+  if (start >= 0 && (!strict || text.indexOf(quote, start + 1) < 0))
     return textRange(root, base + start, base + start + quote.length);
   const normalize = (value: string) => {
     let text = "";
@@ -143,7 +159,7 @@ function recoveredAnnotationRange(
   const normalized = normalize(text),
     needle = normalize(quote).text;
   start = needle ? normalized.text.indexOf(needle) : -1;
-  if (start >= 0)
+  if (start >= 0 && (!strict || normalized.text.indexOf(needle, start + 1) < 0))
     return textRange(
       root,
       base + normalized.offsets[start],
@@ -151,5 +167,5 @@ function recoveredAnnotationRange(
     );
   // Markdown/KaTeX can change the visible character stream. The persisted
   // source-aligned sentence remains the safe fallback for a missing phrase.
-  return whole();
+  return strict ? undefined : whole();
 }

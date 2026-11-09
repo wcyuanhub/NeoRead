@@ -4,6 +4,57 @@
  */
 
 export interface paths {
+    "/api/documents/{id}/translations/typeset/positions": {
+        parameters: {
+            query: {
+                revision: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read verified sentence positions for the current generated PDF */
+        get: {
+            parameters: {
+                query: {
+                    revision: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revision-bound positions and fallback blocks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PDFTypesetPositions"];
+                    };
+                };
+                /** @description Stale revision */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/documents/{id}/translations/typeset": {
         parameters: {
             query?: never;
@@ -4979,6 +5030,34 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        PDFTypesetGlyph: {
+            text: string;
+            bounds: {
+                x: number;
+                y: number;
+                width: number;
+                height: number;
+            };
+        };
+        PDFTypesetPositionBlock: {
+            blockId: string;
+            sourceHash: string;
+            targets: string[];
+            page: number;
+            /** @enum {string} */
+            status: "mapped" | "fallback";
+            reason?: string;
+            sentences: {
+                index: number;
+                glyphs: components["schemas"]["PDFTypesetGlyph"][];
+            }[];
+        };
+        PDFTypesetPositions: {
+            /** @enum {integer} */
+            version: 1;
+            revision: string;
+            blocks: components["schemas"]["PDFTypesetPositionBlock"][];
+        };
         PDFTypesetStatus: {
             /** @enum {string} */
             status: "idle" | "waiting" | "unavailable" | "running" | "complete" | "failed";

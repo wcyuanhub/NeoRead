@@ -4,6 +4,46 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/documents/{id}/translations/typeset/positions":
+        {
+          "parameters":
+            [
+              {
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "schema": { "type": "string" },
+              },
+              {
+                "name": "revision",
+                "in": "query",
+                "required": true,
+                "schema": { "type": "string" },
+              },
+            ],
+          "get":
+            {
+              "summary": "Read verified sentence positions for the current generated PDF",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Revision-bound positions and fallback blocks",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/PDFTypesetPositions",
+                                },
+                            },
+                        },
+                    },
+                  "409": { "description": "Stale revision" },
+                },
+            },
+        },
       "/api/documents/{id}/translations/typeset":
         {
           "parameters":
@@ -5663,6 +5703,89 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "PDFTypesetGlyph":
+            {
+              "type": "object",
+              "required": ["text", "bounds"],
+              "properties":
+                {
+                  "text": { "type": "string" },
+                  "bounds":
+                    {
+                      "type": "object",
+                      "required": ["x", "y", "width", "height"],
+                      "properties":
+                        {
+                          "x": { "type": "number" },
+                          "y": { "type": "number" },
+                          "width": { "type": "number" },
+                          "height": { "type": "number" },
+                        },
+                    },
+                },
+            },
+          "PDFTypesetPositionBlock":
+            {
+              "type": "object",
+              "required":
+                [
+                  "blockId",
+                  "sourceHash",
+                  "targets",
+                  "page",
+                  "status",
+                  "sentences",
+                ],
+              "properties":
+                {
+                  "blockId": { "type": "string" },
+                  "sourceHash": { "type": "string" },
+                  "targets": { "type": "array", "items": { "type": "string" } },
+                  "page": { "type": "integer" },
+                  "status":
+                    { "type": "string", "enum": ["mapped", "fallback"] },
+                  "reason": { "type": "string" },
+                  "sentences":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required": ["index", "glyphs"],
+                          "properties":
+                            {
+                              "index": { "type": "integer" },
+                              "glyphs":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/PDFTypesetGlyph",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "PDFTypesetPositions":
+            {
+              "type": "object",
+              "required": ["version", "revision", "blocks"],
+              "properties":
+                {
+                  "version": { "type": "integer", "enum": [1] },
+                  "revision": { "type": "string" },
+                  "blocks":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "$ref": "#/components/schemas/PDFTypesetPositionBlock",
+                        },
+                    },
+                },
+            },
           "PDFTypesetStatus":
             {
               "type": "object",

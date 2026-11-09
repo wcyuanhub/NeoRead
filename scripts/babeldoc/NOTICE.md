@@ -4,10 +4,12 @@
 https://github.com/funstory-ai/BabelDOC/tree/v0.6.4
 
 NeoRead 修改了 BabelDOC 的两个缓存位置：
+
 - `babeldoc/const.py`：资产缓存读取 `NEOREAD_BABELDOC_CACHE`。
 - `babeldoc/translator/cache.py`：翻译缓存写入一次性工作目录 `NEOREAD_BABELDOC_WORK`。
 
 `worker.py` 通过固定版本的段落钩子注入已保存译文，不调用在线翻译。
+`positions.py` 将排版后的字形与最终 PDF 核验，生成句子坐标；适配源码随运行时一同保留。
 `prepare-babeldoc.mjs` 包含补丁的完整步骤；`requirements.lock` 包含依赖与哈希。
 运行时 `site/` 保留 Python 源码和各包的许可证，`python/` 保留 CPython 及其许可证。
 BabelDOC 的许可证原文位于 `site/babeldoc-0.6.4.dist-info/licenses/LICENSE`。

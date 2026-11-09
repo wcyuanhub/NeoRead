@@ -167,3 +167,78 @@
 .pdf-reading[data-theme="dark"] .pdf-layout-body {
   color: var(--pdf-dark-ink);
 }
+
+.pdf-typeset-block {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+.pdf-reading .translation-document .pdf-typeset-text {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  max-width: none;
+  color: transparent;
+  background: transparent;
+  outline: none;
+  border-radius: 0;
+}
+.pdf-typeset-text .translation-sentence {
+  display: contents;
+}
+.pdf-typeset-text .translation-sentence::after {
+  content: none;
+}
+.pdf-typeset-text .pdf-typeset-glyph {
+  position: absolute;
+  display: inline-block;
+  white-space: pre;
+  color: transparent;
+  user-select: text;
+  pointer-events: auto;
+  cursor: text;
+  font-family: sans-serif;
+  font-weight: 400;
+  overflow: visible;
+}
+.pdf-typeset-text a .pdf-typeset-glyph {
+  cursor: pointer;
+}
+.pdf-typeset-actions {
+  position: absolute;
+  right: 0;
+  top: -28px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+.pdf-typeset-block:hover .pdf-typeset-actions,
+.pdf-typeset-block:focus-within .pdf-typeset-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pdf-typeset-actions button {
+  height: 26px;
+  font-size: 12px;
+}
+.pdf-typeset-fallback {
+  max-width: 52rem;
+  width: min(100%, 52rem);
+  padding: 16px 24px;
+  margin: 0 auto 24px;
+  border-top: 1px solid var(--border);
+  white-space: normal;
+}
+.pdf-typeset-fallback .pdf-typeset-summary {
+  margin: 0 0 16px;
+}
+.pdf-typeset-fallback-block {
+  margin: 16px 0;
+}
+.pdf-typeset-fallback-block > section {
+  margin-bottom: 4px;
+}
+.pdf-typeset-text ::selection {
+  color: transparent;
+}

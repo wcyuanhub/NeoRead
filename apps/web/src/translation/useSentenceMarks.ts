@@ -245,13 +245,15 @@ export function useSentenceMarks(
           rules.push(
             `::highlight(${name}) { ${kind === "underline" ? `text-decoration: underline 2px ${color};` : `background-color: ${color}66;`} }`,
           );
-          rules.push(`.textLayer ::highlight(${name}) { color: transparent; }`);
+          rules.push(
+            `.textLayer ::highlight(${name}), .pdf-typeset-text ::highlight(${name}) { color: transparent; }`,
+          );
         }
         groups.get(name)!.push(mark.range);
       }
       rules.push(
         `::highlight(${searchName}) { background-color: color-mix(in srgb, var(--primary) 25%, transparent); }`,
-        `.textLayer ::highlight(${searchName}) { color: transparent; }`,
+        `.textLayer ::highlight(${searchName}), .pdf-typeset-text ::highlight(${searchName}) { color: transparent; }`,
       );
       const css = rules.join("\n");
       if (style.textContent !== css) style.textContent = css;

@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const typesetVersion = "babeldoc-0.6.4-neoread-1"
+const typesetVersion = "babeldoc-0.6.4-neoread-2"
 
 type pdfTypesetStatus struct {
 	Pages                int    `json:"pages,omitempty"`
@@ -34,7 +34,8 @@ type pdfTypesetStatus struct {
 }
 type pdfTypesetBlock struct {
 	PDFBlock
-	Sentences []TranslationSentence `json:"sentences"`
+	Sentences  []TranslationSentence `json:"sentences"`
+	SourceHash string                `json:"sourceHash"`
 }
 type pdfTypesetSnapshot struct {
 	Version    string            `json:"version"`
@@ -74,7 +75,7 @@ func (s *Server) typesetSnapshot(documentID string) (pdfTypesetSnapshot, string,
 		// Figure/table assets include a saved caption translation. Match only
 		// that caption; never translate labels inside the figure as its prose.
 		block.Text = translationSource(block)
-		snapshot.Blocks = append(snapshot.Blocks, pdfTypesetBlock{block, item.Sentences})
+		snapshot.Blocks = append(snapshot.Blocks, pdfTypesetBlock{block, item.Sentences, item.SourceHash})
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
@@ -112,7 +113,7 @@ func (s *Server) cachedTypeset(documentID, revision string) (pdfTypesetStatus, b
 	root := s.typesetDirectory(documentID, revision)
 	data, err := os.ReadFile(filepath.Join(root, "result.json"))
 	stat, fileErr := os.Stat(filepath.Join(root, "translation.pdf"))
-	if err != nil || fileErr != nil || !stat.Mode().IsRegular() || stat.Size() < 5 || json.Unmarshal(data, &status) != nil || status.Status != "complete" || status.Revision != revision {
+	if err != nil || fileErr != nil || !stat.Mode().IsRegular() || stat.Size() < 5 || !typesetPositionsExist(root) || json.Unmarshal(data, &status) != nil || status.Status != "complete" || status.Revision != revision {
 		return status, false
 	}
 	return status, true
@@ -318,14 +319,18 @@ func (s *Server) runPDFTypeset(parent context.Context, documentID, revision stri
 		status.Status, status.Reason = "failed", "save_failed"
 		return
 	}
-	// Keep only the PDF + summary. Working IR contains prose and is disposable.
+	if err := validateTypesetPositions(filepath.Join(work, "positions.json"), snapshot, revision); err != nil {
+		status.Status, status.Reason = "failed", "invalid_positions"
+		return
+	}
+	// Keep only the PDF + summary + verified positions. Working IR contains prose and is disposable.
 	entries, err := os.ReadDir(work)
 	if err != nil {
 		status.Status, status.Reason = "failed", "save_failed"
 		return
 	}
 	for _, entry := range entries {
-		if entry.Name() != "translation.pdf" && entry.Name() != "result.json" {
+		if entry.Name() != "translation.pdf" && entry.Name() != "result.json" && entry.Name() != "positions.json" {
 			if os.RemoveAll(filepath.Join(work, entry.Name())) != nil {
 				status.Status, status.Reason = "failed", "save_failed"
 				return
@@ -373,4 +378,31 @@ func (s *Server) serveTypeset(w http.ResponseWriter, r *http.Request, documentID
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, filepath.Join(s.typesetDirectory(documentID, revision), "translation.pdf"))
+}
+
+func typesetPositionsExist(root string) bool {
+	stat, err := os.Stat(filepath.Join(root, "positions.json"))
+	return err == nil && stat.Mode().IsRegular() && stat.Size() > 0 && stat.Size() <= 32<<20
+}
+
+func (s *Server) pdfTypesetPositions(w http.ResponseWriter, r *http.Request) {
+	documentID, revision := r.PathValue("id"), r.URL.Query().Get("revision")
+	_, finish, err := s.beginDocumentTask(r.Context(), documentID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer finish()
+	_, current, err := s.typesetSnapshot(documentID)
+	if err != nil || current != revision {
+		fail(w, 409, "译文已变化，请重新生成排版")
+		return
+	}
+	if _, ok := s.cachedTypeset(documentID, revision); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeFile(w, r, filepath.Join(s.typesetDirectory(documentID, revision), "positions.json"))
 }

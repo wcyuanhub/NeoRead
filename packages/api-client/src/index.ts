@@ -185,9 +185,17 @@ export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export type PaperAttachment = components["schemas"]["PaperAttachment"];
 export type PaperRefreshProgress =
   components["schemas"]["PaperRefreshProgress"];
+export type PDFTypesetPositions = components["schemas"]["PDFTypesetPositions"];
+export type PDFTypesetPositionBlock =
+  components["schemas"]["PDFTypesetPositionBlock"];
 export type PDFTypesetStatus = components["schemas"]["PDFTypesetStatus"];
 
 export const api = {
+  pdfTypesetPositions: (id: string, revision: string, signal?: AbortSignal) =>
+    request<PDFTypesetPositions>(
+      `/api/documents/${encodeURIComponent(id)}/translations/typeset/positions?revision=${encodeURIComponent(revision)}`,
+      { signal },
+    ),
   pdfTypeset: (id: string, start = false, signal?: AbortSignal) =>
     request<PDFTypesetStatus>(
       `/api/documents/${encodeURIComponent(id)}/translations/typeset`,

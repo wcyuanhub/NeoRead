@@ -172,6 +172,7 @@ def main():
     snapshot = json.loads(Path(args.snapshot).read_text())
     saved = SavedTranslations(snapshot["blocks"])
     counts = {"translated": 0, "preserved": 0, "translatedCharacters": 0, "preservedCharacters": 0}
+    records = []
     used = set()
     adapter_failed = [False]
 
@@ -214,6 +215,7 @@ def main():
                     return
                 translate_input.placeholders = [p for p in translate_input.placeholders if not isinstance(p, il_translator.FormulaPlaceholder) or p.placeholder in target]
                 self.post_translate_paragraph(paragraph, tracker, translate_input, target)
+                records.append((paragraph, page.page_number + 1, matched[1]))
                 used.update(covered)
                 counts["translated"] += 1
                 counts["translatedCharacters"] += len(original)
@@ -263,6 +265,9 @@ def main():
     with pymupdf.open(result.mono_pdf_path) as output, pymupdf.open(args.input) as original:
         if len(output) != len(original) or any(a.rect != b.rect for a, b in zip(output, original)):
             raise RuntimeError("page_mismatch")
+    from positions import build_positions
+    positions = build_positions(snapshot, records, result.mono_pdf_path, lambda text: math_signature(plain_target(text)))
+    Path(args.output).with_name("positions.json").write_text(json.dumps(positions, ensure_ascii=True))
     shutil.copyfile(result.mono_pdf_path, args.output)
     emit(type="finish", **counts)
 

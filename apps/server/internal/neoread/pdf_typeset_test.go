@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func fakeTypesetRuntime(t *testing.T, output string) string {
+func fakeTypesetRuntime(t *testing.T, s *Server, output string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX worker fixture")
@@ -21,6 +21,20 @@ func fakeTypesetRuntime(t *testing.T, output string) string {
 	if err := os.Symlink("/bin/sh", filepath.Join(root, "python")); err != nil {
 		t.Fatal(err)
 	}
+	snapshot, _, err := s.typesetSnapshot("doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := typesetPositions{Version: 1, Blocks: []typesetPositionBlock{}}
+	for _, b := range snapshot.Blocks {
+		targets := []string{}
+		for _, sentence := range b.Sentences {
+			targets = append(targets, sentence.Target)
+		}
+		positions.Blocks = append(positions.Blocks, typesetPositionBlock{BlockID: b.ID, SourceHash: b.SourceHash, Page: b.Page, Targets: targets, Status: "fallback", Reason: "unverified_positions", Sentences: []typesetSentence{}})
+	}
+	positionData, _ := json.Marshal(positions)
+	output = "printf '%s' '" + strings.ReplaceAll(string(positionData), "'", "'\\''") + "' > \"$(dirname \"$target\")/positions.json\"\n" + output
 	script := "while [ \"$#\" -gt 0 ]; do\nif [ \"$1\" = \"--output\" ]; then shift; target=\"$1\"; fi\nshift\ndone\n" + output
 	if err := os.WriteFile(filepath.Join(root, "worker.py"), []byte(script), 0600); err != nil {
 		t.Fatal(err)
@@ -96,7 +110,7 @@ func TestPDFTypesetSnapshotAndAvailability(t *testing.T) {
 func TestPDFTypesetPublishesAtomicallyAndRejectsOldRevision(t *testing.T) {
 	s, _, m := translationFixture(t)
 	saveExportTranslation(t, s, m.Blocks[0], "第一版译文")
-	fakeTypesetRuntime(t, `printf '%%PDF-1.7\n' > "$target"
+	fakeTypesetRuntime(t, s, `printf '%%PDF-1.7\n' > "$target"
 printf '{"type":"finish","translated":1,"preserved":2}\n'
 `)
 	before, _ := s.Store.processing("doc")
@@ -131,10 +145,11 @@ func TestPDFTypesetRejectsIncompleteWorkerAndCleansWork(t *testing.T) {
 		`printf '%%PDF-1.7\n' > "$target"`,
 		`printf 'invalid PDF' > "$target"; printf '{"type":"finish","translated":1}\n'`,
 		`printf '{"type":"finish","translated":1}\n'; exit 1`,
+		`printf '%%PDF-1.7\n' > "$target"; rm "$(dirname "$target")/positions.json"; printf '{"type":"finish","translated":1}\n'`,
 	} {
 		s, _, m := translationFixture(t)
 		saveExportTranslation(t, s, m.Blocks[0], "译文")
-		fakeTypesetRuntime(t, script)
+		fakeTypesetRuntime(t, s, script)
 		typesetStatus(t, s, "POST")
 		status := awaitTypeset(t, s)
 		if status.Status != "failed" {
@@ -153,7 +168,7 @@ func TestPDFTypesetRejectsIncompleteWorkerAndCleansWork(t *testing.T) {
 func TestPDFTypesetCancellationFinishesDocumentTask(t *testing.T) {
 	s, _, m := translationFixture(t)
 	saveExportTranslation(t, s, m.Blocks[0], "译文")
-	fakeTypesetRuntime(t, "exit 1")
+	fakeTypesetRuntime(t, s, "exit 1")
 	snapshot, revision, _ := s.typesetSnapshot("doc")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -190,7 +205,7 @@ func TestPDFTypesetSnapshotIncludesCaptionOnly(t *testing.T) {
 func TestPDFTypesetCloseCancelsRegisteredQueuedJob(t *testing.T) {
 	s, _, m := translationFixture(t)
 	saveExportTranslation(t, s, m.Blocks[0], "译文")
-	fakeTypesetRuntime(t, "exit 1")
+	fakeTypesetRuntime(t, s, "exit 1")
 	s.typeset.jobs = map[string]pdfTypesetStatus{}
 	s.typeset.lane = make(chan struct{}, 1)
 	s.typeset.lane <- struct{}{}
@@ -216,7 +231,8 @@ func TestPDFTypesetCloseCancelsRegisteredQueuedJob(t *testing.T) {
 }
 
 func TestPDFTypesetRejectsInvalidRuntimeManifest(t *testing.T) {
-	root := fakeTypesetRuntime(t, "exit 1")
+	s, _, _ := translationFixture(t)
+	root := fakeTypesetRuntime(t, s, "exit 1")
 	for _, config := range []string{`{"python":"../python","version":"0.6.4"}`, `{"python":"/bin/sh","version":"0.6.4"}`, `{"python":"python","version":"new"}`} {
 		if err := os.WriteFile(filepath.Join(root, "runtime.json"), []byte(config), 0600); err != nil {
 			t.Fatal(err)
