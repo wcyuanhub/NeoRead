@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile, cp, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makePythonAliasesPortable } from "./babeldoc-runtime-links.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtime = join(root, ".runtime/babeldoc");
@@ -30,6 +31,7 @@ const found = spawnSync(
 );
 if (found.status !== 0) throw new Error("Managed Python was not found");
 const python = found.stdout.trim();
+await makePythonAliasesPortable(join(runtime, "python"));
 await rm(join(runtime, "site"), { recursive: true, force: true });
 run([
   "pip",
@@ -74,6 +76,10 @@ await cp(join(root, "scripts/babeldoc"), join(runtime, "neoread-source"), {
 await cp(
   join(root, "scripts/prepare-babeldoc.mjs"),
   join(runtime, "neoread-source/prepare-babeldoc.mjs"),
+);
+await cp(
+  join(root, "scripts/babeldoc-runtime-links.mjs"),
+  join(runtime, "neoread-source/babeldoc-runtime-links.mjs"),
 );
 await mkdir(join(runtime, "assets"), { recursive: true });
 const warmup = spawnSync(
