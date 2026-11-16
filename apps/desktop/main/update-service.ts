@@ -10,6 +10,7 @@ import {
 } from "./updates";
 import { downloadUpdate, type DownloadProgress } from "./update-download";
 import type { UpdateProgress } from "../../../packages/neoread-core/src/update-progress";
+import { latestReleaseURL } from "../../../packages/neoread-core/src/project-links";
 
 export async function startUpdateService(window: BrowserWindow) {
   const directory = app.getPath("userData");
@@ -240,16 +241,13 @@ export async function startUpdateService(window: BrowserWindow) {
             });
             if (!downloading && selected.response === 0 && alive()) {
               try {
-                await shell.openExternal(
-                  "https://github.com/cynicalight/NeoRead/releases/latest",
-                );
+                await shell.openExternal(latestReleaseURL);
               } catch {
                 if (alive())
                   await dialog.showMessageBox(window, {
                     type: "error",
                     message: "无法打开发布页",
-                    detail:
-                      "请在浏览器中访问 https://github.com/cynicalight/NeoRead/releases/latest",
+                    detail: `请在浏览器中访问 ${latestReleaseURL}`,
                   });
               }
             }

@@ -33,6 +33,7 @@ import {
   type GuideTopic,
 } from "./topics";
 import type { ReleaseItem } from "./releases";
+import { repositoryURL } from "../../../../packages/neoread-core/src/project-links";
 import "./guide.css";
 
 /** One step: the demonstration, then its explanation. */
@@ -226,7 +227,7 @@ export function ReleaseNotesDialog({
 }) {
   const [opening, setOpening] = useState(false);
   const visitGitHub = async (issues: boolean) => {
-    const url = `https://github.com/cynicalight/NeoRead${issues ? "/issues/new/choose" : ""}`;
+    const url = `${repositoryURL}${issues ? "/issues/new/choose" : ""}`;
     setOpening(true);
     try {
       if (window.neoreadDesktop?.openExternal) {

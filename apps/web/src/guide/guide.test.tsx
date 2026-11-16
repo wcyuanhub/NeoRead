@@ -395,7 +395,7 @@ describe("guide host", () => {
       .mockReturnValue({ opener: null } as Window);
     await act(async () => button("去 GitHub 点 Star").click());
     expect(open).toHaveBeenCalledWith(
-      "https://github.com/cynicalight/NeoRead",
+      "https://github.com/wcyuanhub/NeoRead",
       "_blank",
     );
     expect(api.saveGuidePreferences).toHaveBeenCalledWith({
@@ -419,7 +419,7 @@ describe("guide host", () => {
       expect(document.querySelector('[data-slot="dialog-close"]')).toBeNull();
       await act(async () => button("已点 Star，去提 Issue").click());
       expect(openExternal).toHaveBeenCalledWith(
-        "https://github.com/cynicalight/NeoRead/issues/new/choose",
+        "https://github.com/wcyuanhub/NeoRead/issues/new/choose",
       );
       expect(api.saveGuidePreferences).toHaveBeenCalledWith({
         onboarded: true,

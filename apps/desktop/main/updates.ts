@@ -1,4 +1,7 @@
-const releaseURL = "https://github.com/cynicalight/NeoRead/releases";
+import {
+  latestReleaseURL,
+  releasesURL,
+} from "../../../packages/neoread-core/src/project-links";
 export const day = 24 * 60 * 60 * 1000;
 export const retryDelay = 60 * 60 * 1000;
 
@@ -81,7 +84,7 @@ export function selectRelease(
       throw new Error("更新校验清单无效或重复");
     files.add(match[2]);
   }
-  const assetURL = (name: string) => `${releaseURL}/download/${tag}/${name}`;
+  const assetURL = (name: string) => `${releasesURL}/download/${tag}/${name}`;
   // CI uploads the manifest last. A missing platform is not a completed check.
   if (!files.has(installer)) return { status: "pending" };
   const downloadURL = assetURL(installer);
@@ -186,7 +189,7 @@ export class DailyUpdateChecker {
     await save({ ...state });
     // Like electron-updater's public GitHub provider, use the website's JSON
     // response to avoid the anonymous REST API quota shared by an entire IP.
-    const response = await request(`${releaseURL}/latest`, {
+    const response = await request(latestReleaseURL, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(20_000),
       redirect: "follow",
@@ -210,7 +213,7 @@ export class DailyUpdateChecker {
       if (result.status === "pending") {
         // selectRelease has validated the stable tag before it enters this URL.
         const manifest = await request(
-          `${releaseURL}/download/${release.tag_name}/SHA256SUMS.txt`,
+          `${releasesURL}/download/${release.tag_name}/SHA256SUMS.txt`,
           {
             signal: AbortSignal.timeout(20_000),
             redirect: "follow", // Release assets redirect to GitHub's CDN.
