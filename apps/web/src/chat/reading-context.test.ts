@@ -30,14 +30,14 @@ it.each(["codex", "api", "claude", "kimi"])(
   },
 );
 
-it.each(["codex", "api"])(
+it.each(["codex", "api", "claude"])(
   "%s sends a native EPUB position for explicit chapter questions",
   async (provider) => {
     const position: EPUBLocation = {
       type: "epub",
       href: "ch2.xhtml#section",
       progression: 0.7,
-      locator: '{"href":"ch2.xhtml","type":"application/xhtml+xml"}',
+
       blockId: "b7",
     };
     const reader = {
@@ -49,7 +49,7 @@ it.each(["codex", "api"])(
     expect(result.readingLocation).toMatchObject({
       href: "ch2.xhtml#section",
       progression: 0.7,
-      locator: position.locator,
+
       blockId: "b7",
     });
     expect(result.context).toBe("");
@@ -86,7 +86,7 @@ it.each(["codex", "api", "claude", "kimi"])(
   },
 );
 
-it.each(["claude", "kimi"])(
+it.each(["kimi"])(
   "%s still reads text for an explicitly requested page summary",
   async (provider) => {
     const position: PDFLocation = { type: "pdf", page: 4 };

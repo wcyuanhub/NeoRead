@@ -26,9 +26,17 @@ export type PDFLocation = {
     source: string;
     page: number;
     bounds: { x: number; y: number; width: number; height: number };
+    /** UTF-16 offsets in the rendered source paragraph at selection time. */
+    start?: number;
+    end?: number;
+    text?: string;
   }[];
   type: "pdf";
   page: number;
+  /** Paragraph visible in the PDF reflow view. */
+  reflowBlockId?: string;
+  /** Independently saved position of the reflow reading view. */
+  reflowPosition?: { page: number; blockId: string };
   x?: number;
   y?: number;
   quote?: string;
@@ -60,10 +68,16 @@ export type TranslationLocation = TranslationRecoveryAnchor & {
     start: number;
     end: number;
     quote: string;
+    /** Rendered paragraph text used to interpret the UTF-16 offsets. */
+    renderedText?: string;
     location?: EPUBLocation;
   })[];
 };
 export type EPUBLocation = {
+  /** Zero-based publication chapter and chapter-local block positions. */
+  order?: { chapter: number; block: number };
+  /** A historical location could not be safely migrated; retain its note. */
+  unresolved?: boolean;
   blockId?: string;
   /** UTF-16 offsets in block text; endBlockId supports multi-paragraph selections. */
   start?: number;
@@ -75,7 +89,6 @@ export type EPUBLocation = {
   href: string;
   sentenceLink?: SentenceLink;
   translation?: TranslationLocation;
-  locator?: string;
   progression?: number;
   quote?: string;
 };
@@ -191,6 +204,8 @@ export interface PaperLibraryPreferences {
   hidden?: string[];
   /** Categories whose subcategories are folded in the sidebar. */
   collapsed?: string[];
+  /** Folded sidebar sections, by heading ("置顶", "阅读", "分类", "最近阅读"). */
+  collapsedSections?: string[];
   /** A category also lists papers filed in its subcategories (default on). */
   subcategoryItems?: boolean;
   /** Paper pairs ("<id>:<id>", ids sorted) marked as not duplicates. */
@@ -343,6 +358,8 @@ export interface SelectionAnchor {
   bottom: number;
 }
 export interface ReaderSelection {
+  /** Independent sides selected together, saved as separate highlights. */
+  parts?: ReaderSelection[];
   /** Nearby source text, captured before the DOM selection is cleared. */
   context?: { before: string; after: string };
   /** Transient renderer viewport position; never persist as a document anchor. */
@@ -383,6 +400,8 @@ export interface ReaderTheme {
   readerLayout?: Partial<ReaderLayout>;
   /** Opt in to copying text selections and selected annotations. */
   autoCopySelection?: boolean;
+  /** Remembered library navigation sidebar width, in CSS pixels. */
+  librarySidebarWidth?: number;
   autoTranslatePDF?: boolean;
   /** 0 means manual only; otherwise auto translate papers up to this many pages. */
   autoTranslateMaxPages?: number;
@@ -400,7 +419,10 @@ export interface ReaderTheme {
   systemDarkContrast?: "high" | "soft";
   mode: "light" | "sepia" | "dark";
   fontSize: number;
+  /** "sans-serif", "serif" or an installed font family name. */
   fontFamily: string;
+  /** Reflowable source text weight. */
+  fontWeight?: "normal" | "bold";
   lineHeight: number;
   margin: number;
   scroll: boolean;
@@ -411,12 +433,24 @@ export interface ReaderTheme {
   translationFontSize?: number;
   /** AI conversation text scale; 1 keeps the existing size. */
   assistantFontScale?: number;
+  /** AI conversation font: "sans-serif" keeps the interface font. */
+  assistantFontFamily?: string;
+  assistantFontWeight?: "normal" | "bold";
   /** "sans-serif", "serif" or an installed font family name. */
   translationFontFamily?: string;
   linkTranslationAnnotations?: boolean;
+  /** Source and translation paragraphs alternate in one reflowed text column. */
+  textReflow?: boolean;
+  /** Clicking a paragraph centers and outlines it, with or without reflow. */
+  blockFocus?: boolean;
   translationFontWeight?: "normal" | "bold";
   /** The highlight palette, in order; the defaults apply when unset. */
   highlightColors?: HighlightColor[];
+  /**
+   * PDF translation margin in px per side, on the same 0–96 scale as the EPUB
+   * margin; the default 48 keeps a focused text block's width.
+   */
+  pdfTranslationMargin?: number;
   /** Reflowable EPUB text scrolls vertically unless pages are chosen. */
   epubFlow?: "scroll" | "paginated";
 }
@@ -438,15 +472,21 @@ export const defaultTheme: ReaderTheme = {
   mode: "light",
   fontSize: 1.15,
   fontFamily: "serif",
+  fontWeight: "normal",
   lineHeight: 1.8,
-  margin: 40,
+  margin: 48,
   scroll: false,
   zoom: "width",
   translationFontSize: 1,
   assistantFontScale: 1,
+  assistantFontFamily: "sans-serif",
+  assistantFontWeight: "normal",
   translationFontFamily: "serif",
   translationFontWeight: "bold",
+  pdfTranslationMargin: 48,
   linkTranslationAnnotations: true,
+  textReflow: false,
+  blockFocus: true,
   epubFlow: "scroll",
 };
 export type PDFBlockAction =
@@ -524,6 +564,8 @@ export interface ReaderAdapter {
   getPageCount?(): number;
   getPDFViewport?(): PDFPageViewport | undefined;
   followPDFViewport?(viewport: PDFPageViewport): void;
+  /** First page width in CSS pixels at 100%. */
+  getPageWidth?(): Promise<number | undefined>;
   getLocation(): DocumentLocation;
   goTo(location: DocumentLocation): Promise<void>;
   next(): Promise<void>;
@@ -549,6 +591,7 @@ export interface ReaderAdapter {
     blockId: string,
     signal: AbortSignal,
     width?: number,
+    theme?: ReaderTheme,
   ): Promise<Blob>;
   followBlock?(anchor: ReadingAnchor): Promise<void>;
   previewCitation?(
@@ -566,6 +609,8 @@ export interface ReaderAdapter {
     scroll?: boolean,
   ): Promise<void>;
   sentenceRanges?(passages: PDFPassage[]): Range[];
+  /** Source marks the adapter draws itself, with their current ranges. */
+  annotationRanges?(): { annotation: Annotation; range: Range }[];
   prepareAnnotation?(selection: ReaderSelection): Promise<ReaderSelection>;
   focusPassages?(passages: PDFPassage[], scroll?: boolean): Promise<void>;
   matchSentences?(
@@ -627,7 +672,13 @@ export interface ToolActivity {
   title: string;
   target?: string;
   url?: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+  status:
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "unavailable"
+    | "deferred";
   detail?: string;
   startedAt: string;
   finishedAt?: string;
@@ -744,8 +795,8 @@ export interface AICapability {
   error?: string;
 }
 export interface APIConnection {
-  /** Auto detects official endpoints; other addresses use OpenAI Chat Completions. */
-  protocol?: "auto" | "openai" | "anthropic";
+  /** openai is Chat Completions. "auto" only appears in configurations saved before the explicit choice. */
+  protocol?: "openai" | "responses" | "anthropic" | "auto";
   url: string;
   model: string;
   key?: string;
@@ -931,6 +982,7 @@ export interface ChatRun {
   provider: string;
   status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
   error?: string;
+  resumable?: boolean;
   startedAt: string;
   finishedAt?: string;
 }

@@ -21,11 +21,11 @@ import {
   type Document,
   type Message,
 } from "@neoread/core";
-import { api } from "@neoread/api";
 import { Badge } from "@neoread/ui/components/badge";
 import { Button } from "@neoread/ui/components/button";
 import { Input } from "@neoread/ui/components/input";
-import { Textarea } from "@neoread/ui/components/textarea";
+import { PaperNoteRichEditor } from "./PaperNoteRichEditor";
+import { MessageMarkdown } from "./chat/MessageMarkdown";
 import { ScrollArea } from "@neoread/ui/components/scroll-area";
 import {
   Collapsible,
@@ -40,7 +40,12 @@ import { Tabs, TabsList, TabsTrigger } from "@neoread/ui/components/tabs";
 import { toast } from "sonner";
 import { annotationLabels } from "./AnnotationToolbar";
 import { copyText } from "./chat/clipboard";
-import { colorLabel, documentOrder, highlightPalette } from "./annotations";
+import {
+  colorLabel,
+  documentOrder,
+  highlightPalette,
+  validHighlightColor,
+} from "./annotations";
 import { useReaderStore } from "./store";
 
 export { documentOrder };
@@ -129,6 +134,7 @@ function NoteCard({
       <div>
         <Badge variant="outline">
           {annotationLabels[a.kind]}
+          {a.location.type === "epub" && a.location.unresolved && " · 定位异常"}
           {question &&
             (a.answerId ? " · 已回答" : a.resolved ? " · 已解决" : "")}
         </Badge>
@@ -162,7 +168,7 @@ function NoteCard({
           </Button>
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="destructive-ghost"
             aria-label="删除记录"
             disabled={deleting}
             onClick={onDelete}
@@ -171,25 +177,46 @@ function NoteCard({
           </Button>
         </span>
       </div>
-      <Button variant="ghost" className="note-quote" onClick={onGo}>
+      <Button
+        variant="ghost"
+        className="note-quote"
+        style={
+          (a.kind === "highlight" || a.kind === "underline") &&
+          validHighlightColor(a.color)
+            ? { borderLeftColor: a.color }
+            : undefined
+        }
+        onClick={onGo}
+      >
         <AnnotationQuote
           quote={a.quote || locationLabel(a.location)}
           location={a.location}
         />
       </Button>
       {editing ? (
-        <div className="note-editor">
-          <Textarea
+        <div
+          className="note-editor"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !saving) setEditing(false);
+          }}
+        >
+          <PaperNoteRichEditor
+            body={draft}
+            disabled={saving}
+            ariaLabel={question ? "问题" : "批注"}
+            placeholder={question ? "想弄清楚什么？" : "批注内容…"}
             autoFocus
-            aria-label={question ? "问题" : "批注"}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setEditing(false);
-            }}
+            className="annotation-markdown-editor"
+            diagnosticScope="annotation_note"
+            onChange={setDraft}
           />
           <div className="grid grid-cols-2 gap-1">
-            <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setEditing(false)}
+            >
               取消
             </Button>
             <Button
@@ -208,7 +235,9 @@ function NoteCard({
           </div>
         </div>
       ) : (
-        a.note && <p>{a.note}</p>
+        a.note && (
+          <MessageMarkdown content={a.note} animated={false} literalHtml />
+        )
       )}
       {question && !editing && (
         <div className="note-question">
@@ -318,35 +347,35 @@ export function NotesPanel({
   const byId = new Map(messages.map((m) => [m.id, m]));
   return (
     <div className="notes-panel">
-      <div className="notes-search">
-        <Search aria-hidden="true" />
-        <Input
-          type="search"
-          aria-label="搜索批注内容"
-          placeholder="搜索批注内容"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+      <div className="notes-header">
+        <Tabs
+          value={filter}
+          onValueChange={(value) => setFilter(value as NotesFilter)}
+        >
+          <TabsList aria-label="筛选记录" className="notes-filter">
+            {(Object.keys(filterLabels) as NotesFilter[]).map((key) => (
+              <TabsTrigger key={key} value={key} className="px-2 text-xs">
+                {filterLabels[key]}
+                {key !== "all" && counts[key] > 0 && (
+                  <small className="text-muted-foreground">{counts[key]}</small>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <div className="notes-search">
+          <Search aria-hidden="true" />
+          <Input
+            type="search"
+            aria-label="搜索批注内容"
+            placeholder="搜索批注内容"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="notes-list">
-          <Tabs
-            value={filter}
-            onValueChange={(value) => setFilter(value as NotesFilter)}
-          >
-            <TabsList aria-label="筛选记录" className="notes-filter">
-              {(Object.keys(filterLabels) as NotesFilter[]).map((key) => (
-                <TabsTrigger key={key} value={key} className="px-2 text-xs">
-                  {filterLabels[key]}
-                  {key !== "all" && counts[key] > 0 && (
-                    <small className="text-muted-foreground">
-                      {counts[key]}
-                    </small>
-                  )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
           {facets.colors.length > 0 && (
             <div className="notes-facets">
               <ToggleGroup

@@ -1,4 +1,14 @@
-import { annotationsInRects } from "./annotation-hover";
+import {
+  clearFormulaMarks,
+  formulaAwareRects,
+  formulaHighlightRules,
+  markFormulas,
+} from "./formula-highlight";
+import {
+  annotationsAtPoint,
+  annotationsInRects,
+  inside,
+} from "./annotation-hover";
 import { SentenceHover } from "./sentence-hover";
 import { useEffect, useId, useRef } from "react";
 import type { RefObject } from "react";
@@ -14,21 +24,19 @@ import type {
 } from "@neoread/core";
 import { translatedAnnotationRanges } from "./annotations";
 import { sourcePassage, translatedSentenceRanges } from "./sentence-links";
-import { blockRange, resolveEPUBLocation } from "../readers/epub-web-location";
+import { blockRange } from "../readers/epub-web-location";
 import { epubSentenceSlice } from "./epub-links";
 import { searchRanges } from "./search-ranges";
+import {
+  hasReflowSource,
+  reflowSourceRanges,
+  segmentSentences,
+} from "./reflow";
+import { pdfSourceMarkRanges } from "./pdf-source-marks";
 
 type Mark = { annotation: Annotation; range: Range };
 const hit = (range: Range, x: number, y: number) =>
-  Array.from(range.getClientRects()).some(
-    (r) =>
-      r.width &&
-      r.height &&
-      x >= r.left &&
-      x <= r.right &&
-      y >= r.top &&
-      y <= r.bottom,
-  );
+  Array.from(range.getClientRects()).some((r) => inside(r, x, y));
 
 /** Saved marks stay on their origin side; hover may still link sentences. */
 export function useSentenceMarks(
@@ -74,30 +82,30 @@ export function useSentenceMarks(
     let marks: Mark[] = [],
       names: string[] = [],
       frame = 0;
+    // The EPUB adapter draws its own source marks; read them when hit-testing,
+    // since it repaints on its own schedule.
+    const allMarks = () => [...marks, ...(engine.annotationRanges?.() ?? [])];
     const searchName = `${prefix}-search`;
     const cache = new Map<string, Range[]>();
     let geometry = new WeakMap<Range, DOMRect[]>();
-    const containsPoint = (range: Range, x: number, y: number) => {
+    const rectsOf = (range: Range) => {
       let rects = geometry.get(range);
       if (!rects) {
-        rects = Array.from(range.getClientRects());
+        rects = formulaAwareRects([range]);
         geometry.set(range, rects);
       }
-      return rects.some(
-        (r) =>
-          r.width &&
-          r.height &&
-          x >= r.left &&
-          x <= r.right &&
-          y >= r.top &&
-          y <= r.bottom,
-      );
+      return rects;
     };
+    const containsPoint = (range: Range, x: number, y: number) =>
+      rectsOf(range).some((r) => inside(r, x, y));
     const sourceRanges = (t: TranslationBlock, i: number) => {
       const key = `${t.blockId}:${i}`;
       if (!cache.has(key)) {
         const block = latest.current.blocks.find((b) => b.id === t.blockId);
-        if (block && "location" in block) {
+        // Reflowed PDF text renders each source sentence as its own element.
+        if (hasReflowSource(host, t.blockId)) {
+          cache.set(key, reflowSourceRanges(host, t.blockId, i));
+        } else if (block && "location" in block) {
           const slice = epubSentenceSlice(block, t.sentences, [i]);
           // A failed alignment must not highlight the entire paragraph.
           const range = slice
@@ -120,6 +128,10 @@ export function useSentenceMarks(
     let anchor: { x: number; y: number } | undefined;
     let activeRanges: Range[] = [];
     let activeAnnotationTarget: ReaderAnnotationTarget | null = null;
+    // Marks in the active sentence and its hover, so moving within the
+    // sentence can switch between the note card and the sentence highlight.
+    let activeMarked: Annotation[] = [];
+    let activeHover: { key: string; ranges: Range[] } | undefined;
     const cancelEnter = () => {
       clearTimeout(enterTimer);
       enterTimer = undefined;
@@ -135,6 +147,8 @@ export function useSentenceMarks(
         leaveTimer = undefined;
         activeRanges = [];
         activeAnnotationTarget = null;
+        activeMarked = [];
+        activeHover = undefined;
         hover.clear();
       }, 500);
     };
@@ -152,6 +166,8 @@ export function useSentenceMarks(
       cancelLeave();
       activeRanges = [];
       activeAnnotationTarget = null;
+      activeMarked = [];
+      activeHover = undefined;
       hover.clear(true);
     };
     const targetCache = new Map<string, Range[]>();
@@ -171,69 +187,20 @@ export function useSentenceMarks(
         latest.current;
       names.forEach((name) => registry.delete(name));
       registry.delete(searchName);
+      clearFormulaMarks(host, prefix);
       names = [];
       marks = translatedAnnotationRanges(host, annotations, translations);
-      for (const annotation of annotations) {
-        if (
-          annotation.location.type === "epub" &&
-          !annotation.location.translation &&
-          annotation.kind !== "bookmark"
-        ) {
-          const epubBlocks = blocks.filter(
-            (b): b is EPUBReadingBlock => "location" in b,
-          );
-          for (const slice of resolveEPUBLocation(
-            {
-              ...annotation.location,
-              quote: annotation.location.quote || annotation.quote,
-            },
-            epubBlocks,
-          )) {
-            const range = blockRange(host, slice);
-            if (range) marks.push({ annotation, range });
-          }
-        }
-        if (
-          annotation.location.type !== "pdf" ||
-          annotation.location.translation ||
-          annotation.kind === "bookmark"
-        )
-          continue;
-        const passages = annotation.location.sourceAnchors?.flatMap(
-          (anchor) => {
-            const normalize = (text: string) =>
-              text.replace(/\s/g, "").toLowerCase();
-            const candidates = blocks.filter(
-              (block) =>
-                "page" in block &&
-                block.page === anchor.page &&
-                normalize(block.text).includes(normalize(anchor.source)),
-            );
-            const block =
-              candidates.find((block) => block.id === anchor.blockId) ??
-              (candidates.length === 1 ? candidates[0] : undefined);
-            return block
-              ? [{ blockId: block.id, sources: [anchor.source] }]
-              : [];
-          },
-        );
-        if (passages?.length)
-          marks.push(
-            ...(engine.sentenceRanges?.(passages) ?? []).map((range) => ({
-              annotation,
-              range,
-            })),
-          );
-      }
+      for (const annotation of annotations)
+        for (const range of pdfSourceMarkRanges(
+          host,
+          annotation,
+          blocks,
+          engine,
+        ))
+          marks.push({ annotation, range });
       const groups = new Map<string, Range[]>();
       const rules: string[] = [];
       for (const mark of marks) {
-        // The EPUB adapter already paints saved source annotations.
-        if (
-          mark.annotation.location.type === "epub" &&
-          !mark.annotation.location.translation
-        )
-          continue;
         const color = /^#[\da-f]{6}$/i.test(mark.annotation.color)
           ? mark.annotation.color.toLowerCase()
           : "#e6b94c";
@@ -248,12 +215,23 @@ export function useSentenceMarks(
           rules.push(
             `.textLayer ::highlight(${name}), .pdf-typeset-text ::highlight(${name}) { color: transparent; }`,
           );
+          rules.push(
+            ...formulaHighlightRules(
+              name,
+              kind === "underline"
+                ? { underline: color }
+                : { background: `${color}66` },
+            ),
+          );
         }
         groups.get(name)!.push(mark.range);
       }
       rules.push(
         `::highlight(${searchName}) { background-color: color-mix(in srgb, var(--primary) 25%, transparent); }`,
         `.textLayer ::highlight(${searchName}), .pdf-typeset-text ::highlight(${searchName}) { color: transparent; }`,
+        ...formulaHighlightRules(searchName, {
+          background: "color-mix(in srgb, var(--primary) 25%, transparent)",
+        }),
       );
       const css = rules.join("\n");
       if (style.textContent !== css) style.textContent = css;
@@ -261,6 +239,7 @@ export function useSentenceMarks(
         const highlight = new Highlight(...ranges);
         highlight.priority = 1;
         registry.set(name, highlight);
+        markFormulas(host, name, ranges);
         names.push(name);
       }
       if (searchQuery.trim() && searchResults.length) {
@@ -305,11 +284,15 @@ export function useSentenceMarks(
                 );
             });
           } else {
+            // Untranslated reflowed text is visible itself; the PDF text layer
+            // is hidden.
             ranges.push(
               ...searchRanges(
-                engine.sentenceRanges?.([
-                  { blockId: block.id, sources: [block.text] },
-                ]) ?? [],
+                hasReflowSource(host, block.id)
+                  ? reflowSourceRanges(host, block.id)
+                  : (engine.sentenceRanges?.([
+                      { blockId: block.id, sources: [block.text] },
+                    ]) ?? []),
                 searchQuery,
               ),
             );
@@ -319,6 +302,7 @@ export function useSentenceMarks(
           const highlight = new Highlight(...ranges);
           highlight.priority = 2;
           registry.set(searchName, highlight);
+          markFormulas(host, searchName, ranges);
         }
       }
       if (pointer.current && activeRanges.length && leaveTimer === undefined)
@@ -327,6 +311,20 @@ export function useSentenceMarks(
     const schedule = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(paint);
+    };
+    const report = (matches: Annotation[], rects: DOMRect[], x: number) => {
+      activeAnnotationTarget =
+        matches.length && rects.length
+          ? {
+              ids: matches.map((a) => a.id),
+              anchor: {
+                x,
+                top: Math.min(...rects.map((r) => r.top)),
+                bottom: Math.max(...rects.map((r) => r.bottom)),
+              },
+            }
+          : null;
+      latest.current.events.annotationHover?.(activeAnnotationTarget);
     };
     const resolveHover = (point: { target: Element; x: number; y: number }) => {
       const { blocks, translations } = latest.current;
@@ -341,33 +339,49 @@ export function useSentenceMarks(
         deferClear();
         return;
       }
-      const report = (matches: Annotation[], rects: DOMRect[]) => {
-        activeAnnotationTarget =
-          matches.length && rects.length
-            ? {
-                ids: matches.map((a) => a.id),
-                anchor: {
-                  x: point.x,
-                  top: Math.min(...rects.map((r) => r.top)),
-                  bottom: Math.max(...rects.map((r) => r.bottom)),
-                },
-              }
-            : null;
-        latest.current.events.annotationHover?.(activeAnnotationTarget);
-      };
-      const pointRect = new DOMRect(point.x, point.y, 1, 1);
-      const direct = annotationsInRects(
+      const direct = annotationsAtPoint(
         host,
         latest.current.annotations,
-        marks,
-        [pointRect],
+        allMarks(),
+        point.x,
+        point.y,
+        rectsOf,
       );
-      if (direct.length) hover.clear(true);
+      if (direct.annotations.length) hover.clear(true);
       const translated = target.closest<HTMLElement>("[data-sentence]");
+      const reflowed = target.closest<HTMLElement>("[data-source-sentence]");
       let t: TranslationBlock | undefined,
         index = -1,
         fromTranslation = false;
-      if (translated) {
+      if (reflowed) {
+        const blockId = reflowed.closest<HTMLElement>("[data-reflow-source]")
+          ?.dataset.reflowSource;
+        const block = blocks.find((b) => b.id === blockId);
+        t = translations.find(
+          (t) => t.blockId === blockId && t.status === "complete",
+        );
+        if (!t && block?.text)
+          t = {
+            blockId: block.id,
+            sourceHash: "",
+            status: "complete",
+            sentences: segmentSentences(
+              block.image
+                ? (block as { caption?: string }).caption || block.text
+                : block.text,
+            ),
+          };
+        index = Number(reflowed.dataset.sourceSentence);
+        if (
+          t &&
+          !sourceRanges(t, index).some((r) =>
+            containsPoint(r, event.clientX, event.clientY),
+          )
+        ) {
+          deferClear();
+          return;
+        }
+      } else if (translated) {
         const blockId = translated.closest<HTMLElement>(
           "[data-translation-block]",
         )?.dataset.translationBlock;
@@ -411,12 +425,7 @@ export function useSentenceMarks(
             blockId: block.id,
             sourceHash: "",
             status: "complete",
-            sentences: Array.from(
-              new Intl.Segmenter(undefined, {
-                granularity: "sentence",
-              }).segment(block.text),
-              (s) => ({ source: s.segment, target: "" }),
-            ),
+            sentences: segmentSentences(block.text),
           };
         }
         if (t)
@@ -427,7 +436,7 @@ export function useSentenceMarks(
           );
       }
       if (!t || index < 0 || !t.sentences[index]) {
-        report(direct, [pointRect]);
+        report(direct.annotations, direct.rects, point.x);
         deferClear();
         return;
       }
@@ -442,18 +451,28 @@ export function useSentenceMarks(
       const rects = activeRanges.flatMap((range) =>
         Array.from(range.getClientRects()),
       );
-      const matches = annotationsInRects(
-        host,
-        latest.current.annotations,
-        marks,
-        rects,
-      );
-      report(
-        matches,
-        activeRanges.flatMap((range) => Array.from(range.getClientRects())),
-      );
-      if (matches.length) hover.clear(true);
-      else hover.show(`${t.blockId}:${index}:${fromTranslation}`, ranges);
+      activeMarked = [
+        ...new Set([
+          ...annotationsInRects(
+            host,
+            latest.current.annotations,
+            allMarks(),
+            rects,
+          ),
+          ...direct.annotations,
+        ]),
+      ];
+      activeHover = { key: `${t.blockId}:${index}:${fromTranslation}`, ranges };
+      applyPoint(point.x, point.y);
+    };
+    // Only the marked text opens the note; the rest of the sentence hovers.
+    const applyPoint = (x: number, y: number) => {
+      const hit = activeMarked.length
+        ? annotationsAtPoint(host, activeMarked, allMarks(), x, y, rectsOf)
+        : { annotations: [], rects: [] };
+      report(hit.annotations, hit.rects, x);
+      if (hit.annotations.length) hover.clear(true);
+      else if (activeHover) hover.show(activeHover.key, activeHover.ranges);
     };
     const move = (event: PointerEvent) => {
       if (event.buttons || window.getSelection()?.toString().trim()) {
@@ -478,7 +497,7 @@ export function useSentenceMarks(
       ) {
         cancelEnter();
         cancelLeave();
-        latest.current.events.annotationHover?.(activeAnnotationTarget);
+        applyPoint(event.clientX, event.clientY);
         return;
       }
       latest.current.events.annotationHover?.(null);
@@ -495,7 +514,7 @@ export function useSentenceMarks(
         enterTimer = undefined;
         anchor = undefined;
         if (pointer.current) resolveHover(pointer.current);
-      }, 400);
+      }, 100);
     };
     let pressed: { x: number; y: number } | undefined;
     const down = (event: PointerEvent) => {
@@ -515,7 +534,7 @@ export function useSentenceMarks(
       const target = event.target instanceof Element ? event.target : undefined;
       if (target?.closest("a,button,input,textarea,[data-block-action]"))
         return;
-      const matches = marks.filter((m) =>
+      const matches = allMarks().filter((m) =>
         hit(m.range, event.clientX, event.clientY),
       );
       if (!matches.length) return;
@@ -528,7 +547,7 @@ export function useSentenceMarks(
       });
     };
     const textSelector =
-      ".textLayer, [data-epub-block], [data-translation-block]";
+      ".textLayer, [data-epub-block], [data-translation-block], [data-reflow-block]";
     const containsText = (node: Node) =>
       node instanceof Element &&
       (node.matches(textSelector) || !!node.querySelector(textSelector));
@@ -593,6 +612,7 @@ export function useSentenceMarks(
       hover.destroy();
       names.forEach((name) => registry.delete(name));
       registry.delete(searchName);
+      clearFormulaMarks(host, prefix);
       style.remove();
     };
   }, [root, engine, linked, mode, prefix]);

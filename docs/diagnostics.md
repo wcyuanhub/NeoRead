@@ -153,8 +153,12 @@ API 厂商规则、实际强度映射、上游错误分类和请求关联字段�
 
 保留排版生成使用 `pdf.typeset.start / stage / finish`，通过 `runId`、`documentId` 关联。阶段限于读取、布局、段落、公式、译文对应、排版与保存；终态记录受控原因、耗时、译文与保留段落数，以及保留原框排版、居中对齐的段落数。`layout_overflow` 表示译文在允许的行距及字号范围内仍无法放入原区域，新文件不发布。子进程只传递固定阶段和统计，不记录正文、原始异常或 stderr。PDF.js 加载和局部渲染失败分别记录 `pdf.typeset.load_failed / render_failed`。缓存及限制见 [PDF 保留排版译文](pdf-typesetting.md)。
 
-译文 PDF 导出记录 `pdf.translation_export.start / stage / failed / cancelled / download_requested`，用 `requestId` 关联一次导出。阶段为读取快照、排版、保存、请求下载；结果只记录页数、已替换段落数和保留区域数，不记录文件名、正文或异常原文。`download_requested` 表示浏览器已接收下载请求，不代表已经完成磁盘写入。导出取消或失败不修改原文和译文。 失败终态通过 `detail` 中的 `errorCode` 和 `reasonCode` 记录受控分类，区分快照读取、字体下载、模块加载、PDF 解码、加密 PDF、字体嵌入、页面尺寸、排版、无可导出段落、保存、资源清理和下载失败；未知异常使用当前操作的分类或 `unrecognized`，不将异常名称、正文或堆栈写入日志。取消使用 `reasonCode=user_cancelled`，保持 info 级别。
+`pdf.typeset.finish` 同时记录 `coverage` 及已有、已写入、未写入的句子数，并分别汇总 `sourceAlignmentSentences`、`formulaUnresolvedSentences`、`preprocessUnavailableSentences`。这些统计与交互坐标覆盖率独立；文件生成但已有译文未全部写入时为 warn。计数与快照不符、原因未知或原因总数不守恒时以 `invalid_coverage` 失败，不发布缓存，也不将子进程传来的未知原因字符串写入日志。
+
+译文 PDF 导出沿用 `pdf.translation_export.start / stage / failed / cancelled / saved / download_requested / print_dialog_closed`，通过 `requestId` 关联，`detail` 中的受控 `pipeline=typeset/reflow` 区分原版式与 Markdown 重排。原版式阶段为快照读取、排版和保存，只记录页数及译文/保留段落数；重排阶段为读取 Markdown、排版和保存。桌面端仅在原生保存完成后记录 `saved`，取消保存记录 `cancelled`；浏览器 `download_requested` 不代表磁盘写入完成，`print_dialog_closed` 不代表已保存。失败沿用固定 `errorCode` / `reasonCode` 分类，不记录正文、文件名或原始异常。取消不会删除原文、已保存译文或其他阅读视图共享的排版任务。重排打印窗口禁用脚本、应用 preload 和外部资源，并在取消、失败或超时后清理。
 
 `pdf.render.failed` 记录阅读实例首次页面或局部高清渲染失败，`detail` 只包含固定的 `pipeline=object-colors/original` 和 `layer=page/detail`。不记录原始异常、文档文本或路径。每个实例最多一次，避免持续失败造成日志洪泛。对象级配色、画布替换与人工验收范围见 [PDF 对象级配色](pdf-object-colors.md)。
 
-`pdf.typeset.finish` 同时记录 `coverage` 及已有、已写入、未写入的句子数，并分别汇总 `sourceAlignmentSentences`、`formulaUnresolvedSentences`、`preprocessUnavailableSentences`。这些统计与交互坐标覆盖率独立；文件生成但已有译文未全部写入时为 warn。计数与快照不符、原因未知或原因总数不守恒时以 `invalid_coverage` 失败，不发布缓存，也不将子进程传来的未知原因字符串写入日志。
+### 通用文档导出
+
+`document.export.start / saved / download_requested / print_dialog_closed / failed / cancelled` 覆盖导出弹窗的原文、译文和批注流程，以 `requestId` 关联，仅记录目标类别、格式和耗时。`markdown.pdf_export.*` 覆盖独立 Markdown 文档生成 PDF 的步骤。不记录文件名、正文或异常原文。打印窗口关闭只表示用户结束打印操作，不表示已保存文件。

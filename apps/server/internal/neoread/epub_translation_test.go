@@ -18,13 +18,13 @@ func TestEPUBTextBlocksPreserveNestedTextAndUTF16(t *testing.T) {
 	expected := []string{"Before 😀", "Same words.", "After", "Same words."}
 	ids := map[string]bool{}
 	for i, b := range blocks {
-		if b.Text != expected[i] || ids[b.ID] || !validEPUBLocator(b.Location.Locator, b.Location.Href) {
+		if b.Text != expected[i] || ids[b.ID] || !validEPUBLocator(legacyBlockLocator(b), b.Location.Href) {
 			t.Fatalf("invalid block: %+v", b)
 		}
 		ids[b.ID] = true
 	}
 	var loc annotationLocator
-	_ = json.Unmarshal([]byte(blocks[0].Location.Locator), &loc)
+	_ = json.Unmarshal([]byte(legacyBlockLocator(blocks[0])), &loc)
 	if loc.Locations.DOMRange.End.CharOffset != 2 || loc.Locations.TextRange.End != 9 {
 		t.Fatalf("wrong UTF16 offsets: %+v", loc.Locations)
 	}
@@ -82,15 +82,13 @@ func TestEPUBTranslationUsesSharedQueueAndPersistsAcrossRetries(t *testing.T) {
 	}))
 	defer provider.Close()
 	configureTranslationTest(t, s, provider.URL)
-	if err := s.processTranslation(context.Background(), &p); err == nil {
-		t.Fatal("missing paragraph accepted")
+	if err := s.processTranslation(context.Background(), &p); err != nil || p.Status != "complete" {
+		t.Fatalf("individual failure interrupted processing: %+v %v", p, err)
 	}
 	items, err := s.translations(doc.ID, blocks)
 	if err != nil || items[0].Status != "failed" || items[1].Status != "complete" {
 		t.Fatalf("lost partial translations: %+v %v", items, err)
 	}
-	p.Status = "failed"
-	_ = s.Store.saveProcessing(p)
 	response = request(t, s, "POST", "/api/documents/"+doc.ID+"/translations", strings.NewReader(`{"blockId":"`+blocks[0].ID+`"}`))
 	if response.Code != 202 {
 		t.Fatal(response.Body.String())

@@ -46,7 +46,7 @@ const epubBlocks: EPUBReadingBlock[] = [
     id: t.blockId,
     text: "Original sentence.",
     label: "text",
-    location: { type: "epub", href: "chapter.xhtml", locator: "{}" },
+    location: { type: "epub", href: "chapter.xhtml" },
   },
 ];
 const events = {
@@ -68,6 +68,7 @@ const engine = {
 function App({
   linked = true,
   epub = false,
+  reflow = false,
   annotations = [],
   translations = [t],
   searchQuery = "",
@@ -75,6 +76,8 @@ function App({
 }: {
   linked?: boolean;
   epub?: boolean;
+  /** Reflowed PDF text: source and translation share one paragraph. */
+  reflow?: boolean;
   annotations?: Annotation[];
   translations?: TranslationBlock[];
   searchQuery?: string;
@@ -93,6 +96,19 @@ function App({
     searchQuery,
     searchResults,
   );
+  if (reflow)
+    return (
+      <div ref={ref}>
+        <section data-reflow-block="p1-b1">
+          <div data-reflow-source="p1-b1">
+            <span data-source-sentence="0">Original sentence.</span>
+          </div>
+          <div data-translation-block="p1-b1">
+            {translations.length > 0 && <div data-sentence="0">翻译句子。</div>}
+          </div>
+        </section>
+      </div>
+    );
   return (
     <div ref={ref}>
       {epub ? (
@@ -207,6 +223,26 @@ it("maps original search words through PDF sentence ranges", async () => {
   );
   expect(texts(search())).toEqual(["Original"]);
 });
+it("highlights search words in untranslated reflowed source text", async () => {
+  const result: SearchResult = {
+    id: "p1-b1:source:0",
+    blockId: "p1-b1",
+    side: "source",
+    excerpt: "Original sentence.",
+    location: { type: "pdf", page: 1 },
+  };
+  await act(async () =>
+    root.render(
+      <App
+        reflow
+        translations={[]}
+        searchQuery="Original"
+        searchResults={[result]}
+      />,
+    ),
+  );
+  expect(texts(search())).toEqual(["Original"]);
+});
 async function pointer(selector: string, type: string, x: number, buttons = 0) {
   await act(async () => {
     host.querySelector(selector)!.dispatchEvent(
@@ -218,7 +254,7 @@ async function pointer(selector: string, type: string, x: number, buttons = 0) {
         button: 0,
       }),
     );
-    await vi.advanceTimersByTimeAsync(425);
+    await vi.advanceTimersByTimeAsync(125);
   });
 }
 it("highlights both sentence texts in either direction, clears on drag, and keeps native selection untouched", async () => {
@@ -410,16 +446,16 @@ it("waits for dwell, tolerates line gaps, and cancels pending work on interrupti
     });
   };
   send(10);
-  await advance(399);
+  await advance(99);
   send(10, "pointerleave");
   await advance(600);
   expect(matching).not.toHaveBeenCalled();
   expect(hover()).toBeUndefined();
   send(10);
-  await advance(200);
+  await advance(50);
   send(12);
   await act(async () => root.render(<App translations={[{ ...t }]} />));
-  await advance(199);
+  await advance(49);
   expect(matching).not.toHaveBeenCalled();
   expect(hover()).toBeUndefined();
   await advance(1);
@@ -440,12 +476,12 @@ it("waits for dwell, tolerates line gaps, and cancels pending work on interrupti
   await advance(1);
   expect(hover()).toBeUndefined();
   send(10);
-  await advance(399);
+  await advance(99);
   send(10, "pointerdown");
   await advance(600);
   expect(hover()).toBeUndefined();
   send(10);
-  await advance(400);
+  await advance(100);
   expect(hover()).toBeDefined();
   send(10, "scroll");
   expect(hover()).toBeUndefined();
@@ -456,7 +492,7 @@ it("waits for dwell, tolerates line gaps, and cancels pending work on interrupti
 });
 
 it.each(["highlight", "underline", "note"] as const)(
-  "suppresses the whole marked source sentence for %s, previews without selecting, and restores after deletion",
+  "opens the %s note only over the mark and hovers the rest of its sentence",
   async (kind) => {
     const annotation: Annotation = {
       id: "source-mark",
@@ -472,22 +508,30 @@ it.each(["highlight", "underline", "note"] as const)(
         rects: [{ x: 0, y: 0, width: 0.2, height: 1 }],
       },
     };
+    const sentence = ["Original sentence.", "翻译句子。"];
     await act(async () => root.render(<App annotations={[annotation]} />));
-    // Hover the unmarked part of the same sentence.
+    // The unmarked part of the same sentence behaves like any sentence.
     await pointer("[data-source]", "pointermove", 70);
+    expect(texts(hover())).toEqual(sentence);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+    // Moving onto the mark within the sentence opens its note.
+    await pointer("[data-source]", "pointermove", 10);
     expect(hover()).toBeUndefined();
     expect(events.annotationHover).toHaveBeenLastCalledWith(
       expect.objectContaining({ ids: [annotation.id] }),
     );
     expect(events.annotation).not.toHaveBeenCalled();
+    await pointer("[data-source]", "pointermove", 70);
+    expect(texts(hover())).toEqual(sentence);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(null);
     await pointer("[data-source]", "pointerleave", 70);
     expect(events.annotationHover).toHaveBeenLastCalledWith(null);
-    await pointer("[data-source]", "pointermove", 70);
+    await pointer("[data-source]", "pointermove", 10);
     expect(events.annotationHover).toHaveBeenLastCalledWith(
       expect.objectContaining({ ids: [annotation.id] }),
     );
     await act(async () => root.render(<App annotations={[]} />));
-    expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+    expect(texts(hover())).toEqual(sentence);
     expect(events.annotationHover).toHaveBeenLastCalledWith(null);
   },
 );
@@ -530,6 +574,90 @@ it("draws split source anchors independently of translation and linking settings
   expect(events.annotationHover).toHaveBeenLastCalledWith(null);
 });
 
+it("draws a reflow mark at its saved occurrence of repeated text", async () => {
+  const text = "Original sentence.";
+  const start = text.lastIndexOf("e");
+  const a: Annotation = {
+    id: "second-occurrence",
+    documentId: "doc",
+    kind: "highlight",
+    quote: "e",
+    note: "",
+    color: "#6cc58c",
+    createdAt: "",
+    location: {
+      type: "pdf",
+      page: 1,
+      sourceAnchors: [
+        {
+          blockId: "p1-b1",
+          page: 1,
+          source: "e",
+          bounds: blocks[0].bounds,
+          text,
+          start,
+          end: start + 1,
+        },
+      ],
+    },
+  };
+  await act(async () => root.render(<App reflow annotations={[a]} />));
+  const mark = [...registry.entries()].find(([name]) =>
+    name.includes("-highlight-"),
+  );
+  const range = [...mark![1]][0];
+  expect(range.toString()).toBe("e");
+  expect(range.startOffset).toBe(start);
+});
+
+it("draws both source and translation for a mixed reflow selection", async () => {
+  const a: Annotation = {
+    id: "mixed",
+    documentId: "doc",
+    kind: "highlight",
+    quote: "Original sentence.翻译句子。",
+    note: "",
+    color: "#6cc58c",
+    createdAt: "",
+    location: {
+      type: "pdf",
+      page: 1,
+      sourceAnchors: [
+        {
+          blockId: "p1-b1",
+          page: 1,
+          source: "Original sentence.",
+          bounds: blocks[0].bounds,
+        },
+      ],
+      translation: {
+        blockId: "p1-b1",
+        sourceHash: "hash",
+        sentenceIndexes: [0],
+        start: 0,
+        end: 5,
+        ranges: [
+          {
+            blockId: "p1-b1",
+            sourceHash: "hash",
+            sentenceIndexes: [0],
+            start: 0,
+            end: 5,
+            quote: "翻译句子。",
+          },
+        ],
+      },
+    },
+  };
+  await act(async () => root.render(<App reflow annotations={[a]} />));
+  const mark = [...registry.entries()].find(([name]) =>
+    name.includes("-highlight-"),
+  );
+  expect(texts(mark![1])).toEqual(
+    expect.arrayContaining(["Original sentence.", "翻译句子。"]),
+  );
+});
+
 it("links EPUB sentences across inline runs in both directions without changing selection", async () => {
   await act(async () => root.render(<App epub />));
   await pointer("[data-epub-run]", "pointermove", 5);
@@ -566,4 +694,82 @@ it("segments untranslated EPUB source and rejects mismatched translation anchors
   );
   await pointer("[data-sentence]", "pointermove", 205);
   expect(texts(hover())).toEqual(["翻译句子。"]);
+});
+
+it("hit-tests the EPUB adapter's source marks without drawing them again", async () => {
+  const a: Annotation = {
+    id: "epub-source",
+    documentId: "doc",
+    kind: "highlight",
+    quote: "Original",
+    note: "",
+    color: "#6cc58c",
+    createdAt: "",
+    location: {
+      type: "epub",
+      href: "chapter.xhtml",
+      blockId: "p1-b1",
+      start: 0,
+      end: 8,
+    },
+  };
+  engine.annotationRanges = () => {
+    const range = document.createRange();
+    range.selectNodeContents(
+      host.querySelector("[data-epub-run]")!.firstChild!,
+    );
+    return [{ annotation: a, range }];
+  };
+  try {
+    await act(async () => root.render(<App epub annotations={[a]} />));
+    expect(
+      [...registry.keys()].filter((name) => name.includes("-highlight-")),
+    ).toEqual([]);
+    await pointer("[data-epub-run]", "pointermove", 5);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ids: ["epub-source"] }),
+    );
+  } finally {
+    delete engine.annotationRanges;
+  }
+});
+
+it("links reflowed PDF source sentences with their translations", async () => {
+  await act(async () => root.render(<App reflow />));
+  await pointer("[data-source-sentence]", "pointermove", 10);
+  expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+  await pointer("[data-sentence]", "pointermove", 210);
+  expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+  await act(async () => root.render(<App reflow linked={false} />));
+  await pointer("[data-source-sentence]", "pointermove", 10);
+  expect(texts(hover())).toEqual(["Original sentence."]);
+});
+it("draws saved PDF source marks on reflowed text instead of the text layer", async () => {
+  const a: Annotation = {
+    id: "source",
+    documentId: "doc",
+    kind: "highlight",
+    quote: "sentence",
+    note: "",
+    color: "#6cc58c",
+    createdAt: "",
+    location: {
+      type: "pdf",
+      page: 1,
+      quote: "sentence",
+      rects: [{ x: 0.1, y: 0.1, width: 0.2, height: 0.05 }],
+    },
+  };
+  await act(async () =>
+    root.render(<App reflow translations={[]} annotations={[a]} />),
+  );
+  const mark = [...registry.entries()].find(([name]) =>
+    name.includes("-highlight-"),
+  );
+  expect(texts(mark?.[1])).toEqual(["sentence"]);
+  // The marked words open their note, as in the PDF text layer.
+  await pointer("[data-source-sentence]", "pointermove", 10);
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["source"] }),
+  );
 });

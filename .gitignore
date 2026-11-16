@@ -16,4 +16,5 @@ apps/desktop/staging/
 apps/processor/models/
 release/
 .claude/
+/.agents/skills/
 docs/MAKE.epub

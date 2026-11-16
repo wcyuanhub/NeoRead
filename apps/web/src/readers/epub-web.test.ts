@@ -25,6 +25,7 @@ function block(
   text: string,
   href = "a.xhtml",
   offset = 0,
+  order?: EPUBLocation["order"],
 ): EPUBReadingBlock {
   return {
     id,
@@ -34,20 +35,25 @@ function block(
       type: "epub",
       href,
       blockId: id,
+      order,
       start: 0,
       end: text.length,
       quote: text,
-      locator: JSON.stringify({
-        href,
-        type: "application/xhtml+xml",
-        locations: { textRange: { start: offset, end: offset + text.length } },
-      }),
     },
   };
 }
-const a = block("a", "Same words. Same words. 😀", "a.xhtml", 0);
-const b = block("b", "Same words. Next sentence.", "a.xhtml", 30);
-const c = block("c", "Chapter two. Only here.", "b.xhtml", 0);
+const a = block("a", "Same words. Same words. 😀", "a.xhtml", 0, {
+  chapter: 0,
+  block: 0,
+});
+const b = block("b", "Same words. Next sentence.", "a.xhtml", 30, {
+  chapter: 0,
+  block: 1,
+});
+const c = block("c", "Chapter two. Only here.", "b.xhtml", 0, {
+  chapter: 1,
+  block: 0,
+});
 const chapters: EPUBChapter[] = [
   {
     href: "a.xhtml",
@@ -235,15 +241,23 @@ it("renders ordered chapter placeholders, lazily inserts sanitized content witho
 });
 it("captures exact repeated text offsets and UTF-16 positions with a viewport toolbar anchor", async () => {
   await open();
+  expect(reader.getLocation().order).toEqual(a.location.order);
   select("a", 12, 22);
   expect(reader.getSelection()).toMatchObject({
     text: "Same words",
-    location: { href: "a.xhtml", blockId: "a", start: 12, end: 22 },
+    location: {
+      href: "a.xhtml",
+      blockId: "a",
+      start: 12,
+      end: 22,
+      order: a.location.order,
+    },
     anchor: { x: 40 },
   });
   select("b", 0, 10);
   expect(reader.getSelection()?.location).toMatchObject({
     blockId: "b",
+    order: b.location.order,
     start: 0,
     end: 10,
   });
@@ -388,6 +402,11 @@ it("uses TOC and internal fragment links and delegates external URLs", async () 
 it("expands FTS chapter hits into exact repeated occurrences and selects the requested occurrence", async () => {
   await open();
   const results = await reader.search("Same words");
+  expect(results.map((result) => result.excerpt)).toEqual([
+    "Same words.",
+    "Same words.",
+    "Same words.",
+  ]);
   expect(results.map((r) => (r.location as EPUBLocation).start)).toEqual([
     0, 12, 0,
   ]);
@@ -404,23 +423,31 @@ it("expands FTS chapter hits into exact repeated occurrences and selects the req
     end: 22,
   });
 });
-it("resolves legacy offsets and unique quotes without changing stored locations, and leaves ambiguous marks unresolved", async () => {
+it("resolves migrated ranges and leaves unresolved marks untouched", async () => {
   await open();
   const legacy: EPUBLocation = {
     type: "epub",
     href: "a.xhtml",
+    blockId: "b",
+    start: 0,
+    end: 10,
     quote: "Same words",
-    locator: JSON.stringify({
-      locations: { textRange: { start: 30, end: 40 } },
-    }),
   };
   expect(resolveEPUBLocation(legacy, [a, b])).toMatchObject([
     { block: b, start: 0, end: 10 },
   ]);
   expect(
-    resolveEPUBLocation({ type: "epub", href: "b.xhtml", quote: "Only here" }, [
-      c,
-    ]),
+    resolveEPUBLocation(
+      {
+        type: "epub",
+        href: "b.xhtml",
+        blockId: "c",
+        start: 13,
+        end: 22,
+        quote: "Only here",
+      },
+      [c],
+    ),
   ).toMatchObject([{ block: c, start: 13, end: 22 }]);
   const ambiguous: EPUBLocation = {
     type: "epub",
@@ -571,7 +598,9 @@ it("supports a selection spanning adjacent chapters and restores its exact range
     end: 11,
   });
   await reader.goTo(selected.location);
-  expect(window.getSelection()?.toString()).toBe(selected.text);
+  expect(window.getSelection()?.toString()).toBe(
+    selected.text.replace(/\n\n/g, ""),
+  );
 });
 it("keeps UTF-16 offsets correct across inline markup and trimmed block whitespace", async () => {
   vi.mocked(api.epubChapter).mockResolvedValue({
@@ -589,19 +618,27 @@ it("keeps UTF-16 offsets correct across inline markup and trimmed block whitespa
   expect(reader.getSelection()?.text).toBe("words. Same words.");
   expect(reader.getSelection()?.location).toMatchObject({ start: 5, end: 23 });
 });
-it("restores a legacy chapter progression without persisting a migration on open", async () => {
+it("restores migrated chapter progress without writing on open", async () => {
   await open({
     type: "epub",
     href: "b.xhtml",
-    locator: JSON.stringify({ locations: { progression: 0.3 } }),
+    progression: 0.3,
   });
   expect(reader.getLocation().href).toBe("b.xhtml");
   expect(events.location).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
 });
-it("resolves unique legacy quotations across paragraphs with normalized whitespace", () => {
+it("resolves migrated cross-paragraph ranges", () => {
   const slices = resolveEPUBLocation(
-    { type: "epub", href: "a.xhtml", quote: "words. 😀 Same words. Next" },
+    {
+      type: "epub",
+      href: "a.xhtml",
+      blockId: "a",
+      start: 17,
+      endBlockId: "b",
+      end: 16,
+      quote: "words. 😀 Same words. Next",
+    },
     [a, b],
   );
   expect(slices.map((s) => s.block.id)).toEqual(["a", "b"]);
@@ -802,6 +839,33 @@ it("emits note hover independently of selection/click and clears it on leaving",
   expect(events.selection).not.toHaveBeenCalled();
   host.dispatchEvent(new MouseEvent("pointerleave"));
   expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+  // Only the marked words open the note, not the rest of their sentence.
+  const lineBox = text.getBoundingClientRect();
+  Range.prototype.getClientRects = function (this: Range) {
+    return [
+      new DOMRect(
+        lineBox.left + this.startOffset * 10,
+        lineBox.top,
+        (this.endOffset - this.startOffset) * 10,
+        20,
+      ),
+    ] as unknown as DOMRectList;
+  };
+  await reader.highlight([annotation]);
+  const move = (x: number) =>
+    text.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: lineBox.left + x,
+        clientY: lineBox.top + 10,
+      }),
+    );
+  move(105); // "Same words|." — same sentence, outside the mark
+  expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+  move(40);
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["note"] }),
+  );
 });
 
 it("opens from metadata without loading distant text and resolves an unloaded search hit on demand", async () => {
@@ -881,22 +945,80 @@ it("reports the fractional EPUB reading position at the viewport midpoint", asyn
   expect(events.epubReadingAnchor).toHaveBeenLastCalledWith("c", 0.5);
 });
 
-it("smoothly follows EPUB fractions and stops immediately when the user takes over", async () => {
+it("follows EPUB fractions immediately on every scroll frame", async () => {
   await open();
   await reader.goTo({ type: "epub", href: "b.xhtml" });
   host.scrollTop = 500;
-  vi.useFakeTimers();
-  const motion = reader.followBlock({ blockId: "c", fraction: 0.5 });
-  await vi.advanceTimersByTimeAsync(100);
-  expect(host.scrollTop).toBeGreaterThan(500);
-  expect(host.scrollTop).toBeLessThan(840);
-  host.dispatchEvent(new Event("wheel"));
-  const stopped = host.scrollTop;
-  await vi.advanceTimersByTimeAsync(300);
-  await motion;
-  expect(host.scrollTop).toBe(stopped);
-  const resumed = reader.followBlock({ blockId: "c", fraction: 0.75 });
-  await vi.advanceTimersByTimeAsync(300);
-  await resumed;
+  await reader.followBlock({ blockId: "c", fraction: 0.5 });
+  expect(host.scrollTop).toBeCloseTo(840);
+  await reader.followBlock({ blockId: "c", fraction: 0.75 });
   expect(host.scrollTop).toBeCloseTo(862);
+});
+
+it("measures reading progress on the visible translation when reflow hides the source", async () => {
+  await open();
+  await reader.goTo({ type: "epub", href: "b.xhtml" });
+  // Translation-only reflow hides the source runs: their ranges have no boxes.
+  Range.prototype.getBoundingClientRect = () => rect(0, 0);
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  host.scrollTop = 840;
+  events.location.mockClear();
+  host.dispatchEvent(new Event("wheel"));
+  host.dispatchEvent(new Event("scroll"));
+  await vi.waitFor(() => expect(events.location).toHaveBeenCalled());
+  // The midpoint is halfway down paragraph c, not at its end.
+  expect(reader.getLocation()).toMatchObject({
+    blockId: "c",
+    start: Math.round(c.text.length / 2),
+  });
+});
+
+it("goes to the visible translation of a paragraph whose source reflow hides", async () => {
+  await open();
+  await reader.goTo({ type: "epub", href: "b.xhtml" });
+  const source = host.querySelector<HTMLElement>('[data-epub-block="c"]')!;
+  const translation = document.createElement("div");
+  translation.dataset.reflowBlock = "c";
+  source.after(translation);
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  vi.spyOn(Element.prototype, "getClientRects").mockImplementation(function (
+    this: Element,
+  ) {
+    return (this === translation ? [rect(0)] : []) as unknown as DOMRectList;
+  });
+  translation.getBoundingClientRect = () => rect(700);
+  source.getBoundingClientRect = () => rect(0, 0);
+  const before = host.scrollTop;
+  await reader.goTo({
+    type: "epub",
+    href: "b.xhtml",
+    blockId: "c",
+    start: 0,
+    end: 1,
+  });
+  // Centred on the translation at 700, not on the hidden source at 0.
+  expect(host.scrollTop - before).toBe(400);
+});
+
+it("excludes reflow translations from cross-paragraph source quotes", async () => {
+  await open();
+  const translation = document.createElement("section");
+  translation.dataset.translationBlock = "a";
+  translation.textContent = "夹在原文段落中的译文";
+  host.querySelector('[data-epub-block="a"]')!.append(translation);
+  const range = document.createRange();
+  range.setStart(host.querySelector('[data-epub-run="a"]')!.firstChild!, 12);
+  range.setEnd(host.querySelector('[data-epub-run="b"]')!.firstChild!, 10);
+  window.getSelection()!.addRange(range);
+  host.dispatchEvent(new Event("keyup"));
+  expect(reader.getSelection()).toMatchObject({
+    text: "Same words. 😀\n\nSame words",
+    location: {
+      blockId: "a",
+      endBlockId: "b",
+      start: 12,
+      end: 10,
+      quote: "Same words. 😀\n\nSame words",
+    },
+  });
 });

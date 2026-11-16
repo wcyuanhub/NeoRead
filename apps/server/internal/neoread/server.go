@@ -75,6 +75,7 @@ type Server struct {
 	blockedProcessing      map[string]bool
 	modelMu                sync.Mutex
 	modelCache             map[string]modelCatalogEntry
+	modelLoads             map[string]*modelCatalogLoad
 	paperRefresh           paperRefreshState
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
@@ -180,6 +181,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/documents/{id}/assistance", s.setAssistance)
 	mux.HandleFunc("POST /api/documents/{id}/translations/range", s.requestTranslationRange)
 	mux.HandleFunc("POST /api/documents/{id}/translations/chapter", s.requestEPUBTranslationChapter)
+	mux.HandleFunc("POST /api/documents/{id}/translations/chapter-status", s.translationChapterState)
 	mux.HandleFunc("GET /api/documents/{id}/blocks", s.documentBlocks)
 	mux.HandleFunc("GET /api/documents/{id}/epub-blocks", s.epubBlocks)
 	mux.HandleFunc("GET /api/documents/{id}/epub-chapters", s.epubChapters)
@@ -227,10 +229,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/chat-sessions", s.listChatSessions)
 	mux.HandleFunc("POST /api/documents/{id}/chat-sessions", s.createChatSession)
 	mux.HandleFunc("PATCH /api/documents/{id}/chat-sessions/{session}", s.updateChatSession)
+	mux.HandleFunc("DELETE /api/documents/{id}/chat-sessions/{session}", s.deleteChatSession)
 	mux.HandleFunc("GET /api/documents/{id}/chat-sessions/{session}/messages", s.sessionMessages)
 	mux.HandleFunc("POST /api/documents/{id}/chat-sessions/{session}/chat", s.chat)
 	mux.HandleFunc("GET /api/documents/{id}/chat-sessions/{session}/runs/{run}/events", s.sessionRunEvents)
 	mux.HandleFunc("POST /api/documents/{id}/chat-sessions/{session}/runs/{run}/cancel", s.cancelSessionRun)
+	mux.HandleFunc("POST /api/documents/{id}/chat-sessions/{session}/runs/{run}/continue", s.continueSessionRun)
 	mux.HandleFunc("POST /api/documents/{id}/codex-handoff", s.handoffCodex)
 	mux.HandleFunc("GET /api/providers", s.providers)
 	mux.HandleFunc("GET /api/documents/{id}/processing-usage", s.processingUsage)
@@ -819,9 +823,15 @@ func (s *Server) saveAnnotation(w http.ResponseWriter, r *http.Request) {
 	a.DocumentID = d.ID
 	a.CreatedAt = now()
 	a.AnswerID, a.Resolved = "", false
-	if m, e := s.readTranslationSource(d.ID); e == nil {
-		if translations, e := s.visibleTranslations(d.ID, m); e == nil {
-			a = enrichTranslationAnnotation(a, translations)
+	var location struct {
+		Translation *translationMark `json:"translation"`
+	}
+	json.Unmarshal(a.Location, &location)
+	if location.Translation != nil {
+		if m, e := s.readTranslationSource(d.ID); e == nil {
+			if translations, e := s.visibleTranslations(d.ID, m); e == nil {
+				a = enrichTranslationAnnotation(a, translations)
+			}
 		}
 	}
 	result, err := s.Store.saveAnnotation(a)
